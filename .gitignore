@@ -1,0 +1,6 @@
+build/
+build-asan/
+data/
+*.res
+results/run.log
+__pycache__/

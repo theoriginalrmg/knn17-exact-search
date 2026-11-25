@@ -1,0 +1,13 @@
+impl,label,nb,nq,d,k,threads,params,preprocess_s,median_s,min_s,std_s,qps,peak_delta_MiB,working_KiB,check
+tiled,clustered,200000,1,128,10,2,tq=4 tb=2048 S=2 T=2 (db-parallel),0.041340,0.004108,0.003183,0.000712,243.5,0.00,4.3,PASS(1/1)
+faiss,clustered,200000,1,128,10,2,IndexFlatL2 path=seq,0.070659,0.013109,0.011684,0.001971,76.3,1.40,0.0,PASS
+tiled,clustered,200000,64,128,10,2,tq=64 tb=2048 S=2 T=2 (db-parallel),0.045877,0.031610,0.031507,0.000201,2024.7,0.00,79.5,PASS(32/32)
+faiss,clustered,200000,64,128,10,2,IndexFlatL2 path=seq,0.062039,0.184703,0.157560,0.019279,346.5,0.18,0.0,PASS
+tiled,clustered,200000,1024,128,10,2,tq=64 tb=2048 S=1 T=2 (query-parallel),0.041914,0.439692,0.389942,0.072159,2328.9,0.00,64.5,PASS(32/32)
+faiss,clustered,200000,1024,128,10,2,IndexFlatL2 path=blas,0.066539,1.326324,1.167577,0.120085,772.1,6.00,16384.0,PASS
+tiled,ties,200000,1,128,10,2,tq=4 tb=2048 S=2 T=2 (db-parallel),0.044696,0.005280,0.003426,0.001030,189.4,0.00,4.3,PASS(1/1)
+faiss,ties,200000,1,128,10,2,IndexFlatL2 path=seq,0.061413,0.008795,0.007588,0.001975,113.7,1.55,0.0,PASS
+tiled,ties,200000,64,128,10,2,tq=64 tb=2048 S=2 T=2 (db-parallel),0.045898,0.034683,0.033065,0.001401,1845.3,0.00,79.5,PASS(32/32)
+faiss,ties,200000,64,128,10,2,IndexFlatL2 path=seq,0.067755,0.146802,0.145031,0.003766,436.0,0.02,0.0,PASS
+tiled,ties,200000,1024,128,10,2,tq=64 tb=2048 S=1 T=2 (query-parallel),0.038531,0.460762,0.426768,0.022760,2222.4,0.00,64.5,PASS(32/32)
+faiss,ties,200000,1024,128,10,2,IndexFlatL2 path=blas,0.069622,1.187473,1.183724,0.080107,862.3,6.00,16384.0,PASS
