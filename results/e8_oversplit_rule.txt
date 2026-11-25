@@ -1,0 +1,8 @@
+    // Threads do not run at equal speed, so one equal chunk per thread waits for
+    // the slowest. For a single query tile, aim for ~4 chunks per thread so that
+    // dynamic scheduling can rebalance, but keep >= 200*k rows per chunk: every
+    // chunk refills its own heaps, which dominates when k is large.
+    if (S > 1 && nqt == 1) {
+        size_t by_k = nb / (200 * std::max<size_t>(k, 1));
+        S = std::max(S, int(std::min<size_t>(std::min(4 * T, smax), by_k)));
+    }
