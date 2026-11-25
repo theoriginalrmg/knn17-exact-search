@@ -27,5 +27,8 @@ target_link_libraries(knn_test knn)
 add_executable(knn_bench bench/knn_bench.cpp)
 target_link_libraries(knn_bench knn)
 
+add_executable(bandwidth bench/bandwidth.cpp)
+target_link_libraries(bandwidth knn)
+
 enable_testing()
 add_test(NAME knn_test COMMAND knn_test)

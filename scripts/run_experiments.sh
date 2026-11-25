@@ -29,7 +29,7 @@ both() {  # csv label db q nq k T
 }
 hdr() { $B header > "$1"; }
 
-E=${*:-E1 E2 E3 E4 E5 E6}
+E=${*:-E1 E2 E3 E4 E5 E6 E7}
 
 # E1: query batch size x threads (main result) — uniform, nb=200k, d=128, k=10
 if [[ " $E " == *" E1 "* ]]; then
@@ -81,5 +81,24 @@ if [[ " $E " == *" E6 "* ]]; then
   hdr $R/e6_reference.csv
   for nq in 1 16; do
     $B run --impl ref --db data/u128_db.fbin --q data/u128_q.fbin --nq $nq --k 10 --reps 3 --check 0 --label ref | tee -a $R/e6_reference.csv
+  done
+fi
+
+# E7: is nq=1 limited by memory bandwidth? STREAM-style read vs our nq=1 scan,
+# same threads and pinning. 1024 MiB = far above L3; 99 MiB = packed db size.
+# "incache": 1 thread on a 2000-row db (1 MiB, fits L2) = speed without RAM.
+if [[ " $E " == *" E7 "* ]]; then
+  gen uniform 200000 128 1 u128_db.fbin; gen uniform 4096 128 2 u128_q.fbin
+  gen uniform 2000 128 1 u128_db2k.fbin
+  ./build/bandwidth header > $R/e7_bandwidth.csv
+  hdr $R/e7_scan.csv
+  Q="--q data/u128_q.fbin --nq 1 --k 10 --check 1"
+  for round in 1 2 3 4 5; do
+    for T in $THREADS; do [ "$T" -le "$MAXT" ] || continue
+      ./build/bandwidth 1024 $T 11 | tee -a $R/e7_bandwidth.csv
+      ./build/bandwidth 99 $T 41 | tee -a $R/e7_bandwidth.csv
+      $B run --db data/u128_db.fbin $Q --threads $T --reps 41 --label scan | tee -a $R/e7_scan.csv
+    done
+    $B run --db data/u128_db2k.fbin $Q --threads 1 --reps 501 --label incache | tee -a $R/e7_scan.csv
   done
 fi

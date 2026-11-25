@@ -142,5 +142,38 @@ if e6:
     for r in e6: out.append(f"| {r['nq']} | {ms(r['median_s'])} | {ms(r['median_s']/r['nq'])} |")
     out.append("")
 
+# ------------------------------------------------------------------ E7 ----
+bwp = os.path.join(R, "e7_bandwidth.csv")
+e7 = load("e7_scan.csv")
+if e7 and os.path.exists(bwp):
+    bw, sc = defaultdict(list), defaultdict(list)
+    with open(bwp) as f:
+        for r in csv.DictReader(f): bw[int(r["threads"]), int(r["MiB"])].append(float(r["median_GBs"]))
+    for r in e7:  # bytes read per query: packed panels (16 rows each) + one norm per row
+        gb = (r["nb"] + 15) // 16 * 16 * (r["d"] + 1) * 4 / 1e9
+        sc[r["label"], r["threads"]].append(gb / r["median_s"])
+    med, rng = statistics.median, lambda v: f"{min(v):.1f}–{max(v):.1f}"
+    Ts = sorted({t for l, t in sc if l == "scan"})
+    out.append("## E7 — memory bandwidth vs nq=1 scan rate (uniform, nb=200k, d=128, k=10)\n")
+    out.append("Median of 5 rounds (range), GB/s = 10^9 bytes/s. Scan rate = packed database bytes (103.2 MB) / search time.\n")
+    out.append("| T | read 1 GiB | read 99 MiB | our nq=1 scan | scan / read 1 GiB | scan / read 99 MiB |")
+    out.append("|---|---|---|---|---|---|")
+    for T in Ts:
+        a, b, c = bw[T, 1024], bw[T, 99], sc["scan", T]
+        out.append(f"| {T} | {med(a):.1f} ({rng(a)}) | {med(b):.1f} ({rng(b)}) | {med(c):.1f} ({rng(c)}) | "
+                   f"{100*med(c)/med(a):.0f}% | {100*med(c)/med(b):.0f}% |")
+    if sc["incache", 1]:
+        c = sc["incache", 1]
+        out.append(f"\nIn-cache scan (2000 rows, fits L2), 1 thread: {med(c):.1f} GB/s ({rng(c)}).")
+    out.append("")
+    fig, ax = plt.subplots(figsize=(5.2, 3.2))
+    ax.plot(Ts, [med(bw[T, 1024]) for T in Ts], color=MUTED, lw=2, marker="^", ms=5, label="memory read, 1 GiB")
+    ax.plot(Ts, [med(bw[T, 99]) for T in Ts], color=OURS, lw=2, marker="o", ms=5, label="memory read, 99 MiB")
+    ax.plot(Ts, [med(sc["scan", T]) for T in Ts], color=FAISS, lw=2, marker="s", ms=5, label="our nq=1 scan")
+    ax.set_xticks(Ts); ax.set_ylim(bottom=0); ax.set_xlabel("threads"); ax.set_ylabel("GB/s (median)")
+    ax.legend(frameon=False, loc="lower right")
+    ax.set_title("E7 · nq=1 scan rate vs memory read bandwidth", loc="left", color=INK, fontsize=10)
+    fig.tight_layout(); fig.savefig(os.path.join(R, "fig_e7_bandwidth.png"), dpi=160); plt.close(fig)
+
 open(os.path.join(R, "summary.md"), "w").write("\n".join(out))
 print("\n".join(out))
