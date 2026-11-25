@@ -3,4 +3,5 @@ build-asan/
 data/
 *.res
 results/run.log
-__pycache__/
+__pycache__/CLAUDE.md
+.claude/
