@@ -34,7 +34,7 @@ Which kernel produced which results:
 
 | Results | Machine | Kernel |
 |---|---|---|
-| E1 (`e1_batch.csv`, `fig_e1_*.png`) | i7-13650HX laptop, WSL2 Ubuntu 22.04, g++ 11.4, 20 threads, pinned (`OMP_PROC_BIND=close OMP_PLACES=threads`) | AVX2, 6 × 16 |
+| E1 (`e1_batch.csv`, `fig_e1_*.png`) | i7-13650HX laptop, WSL2 Ubuntu 22.04, g++ 11.4, 20 threads, pinned (`OMP_PROC_BIND=close OMP_PLACES=threads`) | AVX2, 6 × 16 (run before the 1 × 16 / 2 × 16 kernels were added) |
 | E2–E6 (`e2`–`e6` CSVs, `fig_e5_selector.png`) | 2-vCPU cloud VM (below), not pinned | AVX-512, 4 × 32 |
 
 The two sets must not be compared with each other. The numbers quoted under
@@ -89,7 +89,8 @@ far point swapped in, a wrong distance, and an unsorted row.
    * **AVX2 + FMA:** 6 queries × 16 rows in intrinsics → 12 accumulators + 2 loads
      + 1 broadcast = 15 of the 16 registers (no spills in the inner loop, checked
      with `objdump`). A 4 × 16 tile was also tried: slower at nq = 64 and 4096,
-     faster at nq = 1.
+     faster at nq = 1. For nq = 1 and 2 the selector uses 1 × 16 and 2 × 16
+     kernels instead of padding to 6 rows; from nq = 3 on, padding is faster.
    * Otherwise the 4 × 32 vector-extension code is the portable fallback. It is
      correct but slow on AVX2: each 16-float vector becomes two registers, so the
      8 accumulators alone fill the register file, and g++ 11 spills them to the

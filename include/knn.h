@@ -85,6 +85,8 @@ struct SearchParams {
     int db_splits = 0;    // S: how many database chunks run in parallel
                           //    1 = query-parallel, >1 = (partly) db-parallel
     int nthreads = 0;     // 0 = omp_get_max_threads()
+    int mr = 0;           // queries per micro-kernel call: 1, 2 or the full
+                          // height MR (any other value means MR; 0 = selector)
     std::string describe() const;
 };
 

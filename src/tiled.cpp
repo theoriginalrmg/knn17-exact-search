@@ -119,51 +119,65 @@ static inline void heap_init(float* hd, idx_t* hi, size_t k) {
 }
 
 // ------------------------------------------------------- micro-kernel -----
-// acc[r][c] = <query r, database rows of panel c> for MR queries x NP panels.
+// acc[r][c] = <query r, database rows of panel c> for R queries x NP panels.
 #if KNN_AVX2_KERNEL
-// 12 accumulators + 2 loads + 1 broadcast = 15 of the 16 AVX2 registers.
+// 6 rows: 12 accumulators + 2 loads + 1 broadcast = 15 of the 16 AVX2 registers.
+// 1 and 2 rows: tiny batches (nq < MR), so no work is spent on padding rows.
 // Accumulators are named locals (not an array) so they stay in registers.
-#define KNN_ROWS(X) X(0) X(1) X(2) X(3) X(4) X(5)
-static_assert(MR == 6, "KNN_ROWS must list exactly MR rows");
-
-template <int NP>
-static inline void micro_kernel(const float* __restrict Q, size_t d,
-                                const float* __restrict P, v16 acc[MR][NP]) {
-    static_assert(NP == 1, "the AVX2 tile is one panel wide");
-#define X(r)                                                   \
+#define KNN_INIT(r)                                                  \
     __m256 lo##r = _mm256_setzero_ps(), hi##r = _mm256_setzero_ps(); \
     const float* q##r = Q + r * d;
-    KNN_ROWS(X)
-#undef X
-    for (size_t t = 0; t < d; t++) {
-        const __m256 blo = _mm256_load_ps(P + t * PANEL);
-        const __m256 bhi = _mm256_load_ps(P + t * PANEL + 8);
-        __m256 a;
-#define X(r)                              \
-    a = _mm256_broadcast_ss(q##r + t);    \
+#define KNN_STEP(r)                         \
+    a = _mm256_broadcast_ss(q##r + t);      \
     lo##r = _mm256_fmadd_ps(a, blo, lo##r); \
     hi##r = _mm256_fmadd_ps(a, bhi, hi##r);
-        KNN_ROWS(X)
-#undef X
+#define KNN_STORE(r) acc[r][0] = {lo##r, hi##r};
+#define KNN_ROWS1(X) X(0)
+#define KNN_ROWS2(X) X(0) X(1)
+#define KNN_ROWS6(X) X(0) X(1) X(2) X(3) X(4) X(5)
+#define KNN_KERNEL(ROWS)                                              \
+    ROWS(KNN_INIT)                                                    \
+    for (size_t t = 0; t < d; t++) {                                  \
+        const __m256 blo = _mm256_load_ps(P + t * PANEL);             \
+        const __m256 bhi = _mm256_load_ps(P + t * PANEL + 8);         \
+        __m256 a;                                                     \
+        ROWS(KNN_STEP)                                                \
+    }                                                                 \
+    ROWS(KNN_STORE)
+
+template <int R, int NP>
+static inline void micro_kernel(const float* __restrict Q, size_t d,
+                                const float* __restrict P, v16 (*acc)[NP]) {
+    static_assert(NP == 1, "the AVX2 tile is one panel wide");
+    static_assert(R == 1 || R == 2 || R == 6, "no AVX2 kernel with R rows");
+    if constexpr (R == 1) {
+        KNN_KERNEL(KNN_ROWS1)
+    } else if constexpr (R == 2) {
+        KNN_KERNEL(KNN_ROWS2)
+    } else {
+        KNN_KERNEL(KNN_ROWS6)
     }
-#define X(r) acc[r][0] = {lo##r, hi##r};
-    KNN_ROWS(X)
-#undef X
 }
-#undef KNN_ROWS
+#undef KNN_KERNEL
+#undef KNN_ROWS1
+#undef KNN_ROWS2
+#undef KNN_ROWS6
+#undef KNN_INIT
+#undef KNN_STEP
+#undef KNN_STORE
 #else
 // Each step loads NP vectors of database values for dimension t and does
-// MR*NP broadcast-FMAs: the CPU analogue of the GEMM inner loop.
-template <int NP>
+// R*NP broadcast-FMAs: the CPU analogue of the GEMM inner loop.
+template <int R, int NP>
 static inline void micro_kernel(const float* __restrict Q, size_t d,
-                                const float* __restrict P, v16 acc[MR][NP]) {
-    for (size_t r = 0; r < MR; r++)
+                                const float* __restrict P, v16 (*acc)[NP]) {
+    for (size_t r = 0; r < size_t(R); r++)
         for (int c = 0; c < NP; c++) acc[r][c] = (v16){};
     const size_t ps = d * PANEL;  // panel stride
     for (size_t t = 0; t < d; t++) {
         v16 b[NP];
         for (int c = 0; c < NP; c++) b[c] = *(const v16*)(P + c * ps + t * PANEL);
-        for (size_t r = 0; r < MR; r++) {
+        for (size_t r = 0; r < size_t(R); r++) {
             float a = Q[r * d + t];
             for (int c = 0; c < NP; c++) acc[r][c] += a * b[c];
         }
@@ -174,7 +188,7 @@ static inline void micro_kernel(const float* __restrict Q, size_t d,
 // Consume the micro-kernel output directly into the per-query heaps.
 // pd = ||y||^2 - 2<x,y>  (the ||x||^2 term is added after selection).
 template <int NP>
-static inline void select_from_registers(v16 acc[MR][NP], const float* yn,
+static inline void select_from_registers(v16 (*acc)[NP], const float* yn,
                                          idx_t id0, size_t nrows, float** hd,
                                          idx_t** hi, float* thr, size_t k) {
     for (size_t r = 0; r < nrows; r++) {
@@ -213,6 +227,31 @@ static inline void select_from_registers(v16 acc[MR][NP], const float* yn,
     }
 }
 
+// All queries of a tile against database panels [b0, b1), R queries at a time.
+template <int R>
+static inline void scan_block(const PackedDB& db, const float* Qt, size_t nqt_rows,
+                              size_t b0, size_t b1, float** hd, idx_t** hi,
+                              float* thr, size_t k) {
+    const size_t d = db.d;
+    for (size_t g = 0; g < nqt_rows; g += R) {
+        const size_t rows = std::min<size_t>(R, nqt_rows - g);
+        const float* Qg = Qt + g * d;
+        size_t pp = b0;
+        for (; pp + NP_MAX <= b1; pp += NP_MAX) {
+            v16 acc[R][NP_MAX];
+            micro_kernel<R, NP_MAX>(Qg, d, db.panels + pp * d * PANEL, acc);
+            select_from_registers<NP_MAX>(acc, db.norms + pp * PANEL, idx_t(pp * PANEL),
+                                          rows, hd + g, hi + g, thr + g, k);
+        }
+        if (NP_MAX > 1 && pp < b1) {
+            v16 acc[R][1];
+            micro_kernel<R, 1>(Qg, d, db.panels + pp * d * PANEL, acc);
+            select_from_registers<1>(acc, db.norms + pp * PANEL, idx_t(pp * PANEL),
+                                     rows, hd + g, hi + g, thr + g, k);
+        }
+    }
+}
+
 // ------------------------------------------------------------ selector ----
 MachineInfo MachineInfo::detect() {
     MachineInfo m;
@@ -226,6 +265,7 @@ MachineInfo MachineInfo::detect() {
 std::string SearchParams::describe() const {
     std::ostringstream os;
     os << "tq=" << tq << " tb=" << tb << " S=" << db_splits << " T=" << nthreads
+       << " mr=" << mr
        << (db_splits == 1 ? " (query-parallel)" : " (db-parallel)");
     return os.str();
 }
@@ -252,6 +292,14 @@ SearchParams select_params(size_t nq, size_t nb, size_t d, size_t k,
         tq = std::max(MR, tq / 2 / MR * MR);
     tq = std::min(tq, round_up(std::max<size_t>(nq, 1), MR));
     p.tq = std::max(tq, MR);
+
+    // Kernel height: MR, except for 1 or 2 queries, where padding up to MR rows
+    // wastes most of the arithmetic. From 3 queries on, one padded MR-row pass
+    // beats several 1/2-row passes over the block. (Measured on AVX2 only.)
+    p.mr = int(MR);
+#if KNN_AVX2_KERNEL
+    if (nq <= 2) p.mr = int(std::max<size_t>(nq, 1));
+#endif
 
     // Parallelism: large batches -> query-parallel (no merge, no extra
     // memory); small batches -> split the database into S chunks so all T
@@ -290,6 +338,8 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
     if (!p.tb) p.tb = auto_p.tb;
     if (!p.db_splits) p.db_splits = auto_p.db_splits;
     if (!p.nthreads) p.nthreads = auto_p.nthreads;
+    if (!p.mr) p.mr = auto_p.mr;
+    if (p.mr != 1 && p.mr != 2) p.mr = int(MR);
     p.tq = round_up(p.tq, MR);
     p.tb = std::max<size_t>(PANEL, round_up(p.tb, PANEL));
     if (nq == 0 || k == 0) return p;
@@ -338,25 +388,12 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
 
             for (size_t b0 = p0; b0 < p1; b0 += bp) {        // L2 block of DB
                 size_t b1 = std::min(p1, b0 + bp);
-                for (size_t g = 0; g < nqt_rows; g += MR) {    // query group
-                    size_t rows = std::min(MR, nqt_rows - g);
-                    const float* Qg = Qt + g * d;
-                    size_t pp = b0;
-                    for (; pp + NP_MAX <= b1; pp += NP_MAX) {
-                        v16 acc[MR][NP_MAX];
-                        micro_kernel<NP_MAX>(Qg, d, db.panels + pp * d * PANEL, acc);
-                        select_from_registers<NP_MAX>(acc, db.norms + pp * PANEL,
-                                                      idx_t(pp * PANEL), rows, &hdp[g],
-                                                      &hip[g], &thr[g], k);
-                    }
-                    if (NP_MAX > 1 && pp < b1) {
-                        v16 acc[MR][1];
-                        micro_kernel<1>(Qg, d, db.panels + pp * d * PANEL, acc);
-                        select_from_registers<1>(acc, db.norms + pp * PANEL,
-                                                 idx_t(pp * PANEL), rows, &hdp[g],
-                                                 &hip[g], &thr[g], k);
-                    }
-                }
+                if (p.mr == 1)
+                    scan_block<1>(db, Qt, nqt_rows, b0, b1, hdp.data(), hip.data(), thr.data(), k);
+                else if (p.mr == 2)
+                    scan_block<2>(db, Qt, nqt_rows, b0, b1, hdp.data(), hip.data(), thr.data(), k);
+                else
+                    scan_block<int(MR)>(db, Qt, nqt_rows, b0, b1, hdp.data(), hip.data(), thr.data(), k);
             }
         }
         std::free(Qt);

@@ -2,7 +2,7 @@
 //
 //   knn_bench gen   --family uniform|clustered|ties --n N --d D --seed S --out f.fbin
 //   knn_bench run   --db db.fbin --q q.fbin --k K [--impl tiled|ref] [--threads T]
-//                   [--S s --tq q --tb b] [--reps R] [--check M] [--label L]
+//                   [--S s --tq q --tb b --mr m] [--reps R] [--check M] [--label L]
 //                   [--save-res out.res]
 //   knn_bench check --db db.fbin --q q.fbin --k K --res result.res [--check M]
 //
@@ -108,6 +108,7 @@ int main(int argc, char** argv) {
     p.db_splits = std::stoi(get(a, "S", "0"));
     p.tq = std::stoul(get(a, "tq", "0"));
     p.tb = std::stoul(get(a, "tb", "0"));
+    p.mr = std::stoi(get(a, "mr", "0"));
     double t0 = now_sec();
     if (impl == "tiled") pack_database(Y.data(), nb, d, db);
     double pre = now_sec() - t0;

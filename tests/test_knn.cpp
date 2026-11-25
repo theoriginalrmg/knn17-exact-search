@@ -118,6 +118,8 @@ static void test_randomized() {
             case 3: p.tq = 4 * (1 + rng() % 8); p.tb = 32; p.nthreads = 2; break;
             case 4: p.db_splits = 2; p.tq = 4; p.nthreads = 1; break;    // serial merge
         }
+        const int mrs[4] = {0, 1, 2, 99};  // selector, 1-row, 2-row, full kernel
+        p.mr = mrs[(it / 15) % 4];
         std::vector<float> D;
         std::vector<idx_t> I;
         run_tiled(Y, nb, X, nq, d, k, p, D, I);
@@ -142,6 +144,24 @@ static void test_randomized() {
                 strict_total, rows_total);
 }
 
+// Tiny batches: every kernel height, query-parallel and split, strict ties.
+static void test_tiny_batches() {
+    std::printf("[tiny batches]\n");
+    const size_t nb = 333, d = 17, k = 7;
+    auto Y = make_family("ties", nb, d, 11);
+    for (size_t nq = 1; nq <= 8; nq++)
+        for (int mr : {0, 1, 2, 99})
+            for (int S : {0, 1, 3}) {
+                auto X = make_family("ties", nq, d, 100 + nq);
+                SearchParams p; p.mr = mr; p.db_splits = S; p.tb = 32; p.nthreads = 2;
+                std::vector<float> D;
+                std::vector<idx_t> I;
+                run_tiled(Y, nb, X, nq, d, k, p, D, I);
+                auto rep = check_results(X.data(), nq, Y.data(), nb, d, k, D.data(), I.data());
+                EXPECT(rep.passed() && rep.strict_rows_ok == nq, "tiny batch strict match");
+            }
+}
+
 static void test_selector() {
     std::printf("[selector sanity]\n");
     MachineInfo m; m.l1d = 48 << 10; m.l2 = 2 << 20; m.nthreads = 8;
@@ -156,6 +176,7 @@ int main() {
     test_hand_checked();
     test_checker_rejects();
     test_randomized();
+    test_tiny_batches();
     test_selector();
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nALL TESTS PASSED\n", failures);
     return failures ? 1 : 0;
