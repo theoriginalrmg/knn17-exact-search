@@ -102,9 +102,9 @@ def pair_table(rows, title, key):
                            f"{o['params']} | {f['params'].split('path=')[1]} | {o['check']} / {f['check']} |")
     out.append("")
 
-pair_table(load("e2_dim.csv"), "E2 — dimension (uniform, nb=100k, k=10, all threads)", "d")
-pair_table(load("e3_k.csv"), "E3 — k (uniform, nb=200k, d=128, all threads)", "k")
-pair_table(load("e4_family.csv"), "E4 — input families (nb=200k, d=128, k=10, all threads)", "fam")
+pair_table(load("e2_dim.csv"), "E2 — dimension (uniform, nb=100k, k=10, 14 threads)", "d")
+pair_table(load("e3_k.csv"), "E3 — k (uniform, nb=200k, d=128, 14 threads)", "k")
+pair_table(load("e4_family.csv"), "E4 — input families (nb=200k, d=128, k=10, 14 threads)", "fam")
 
 # ------------------------------------------------------------------ E5 ----
 e5 = load("e5_selector.csv")

@@ -11,6 +11,8 @@ REPS=${REPS:-5}
 MAXT=$(nproc)
 # E1 thread counts for the i7-13650HX (6 P-cores = 12 threads, 8 E-cores, 20 total)
 THREADS="1 2 4 6 8 12 14 20"
+# E2-E4 use 14 threads: with all 20, timings are too noisy
+T14=$(( MAXT < 14 ? MAXT : 14 ))
 # same pinning for knn_bench and faiss_bench.py (both use OpenMP)
 export OMP_PROC_BIND=close OMP_PLACES=threads
 
@@ -39,28 +41,28 @@ if [[ " $E " == *" E1 "* ]]; then
     both $R/e1_batch.csv batch u128_db.fbin u128_q.fbin $nq 10 $T; done; done
 fi
 
-# E2: dimension — nb=100k, k=10, all threads
+# E2: dimension — nb=100k, k=10, 14 threads
 if [[ " $E " == *" E2 "* ]]; then
   hdr $R/e2_dim.csv
   for d in 32 128 512; do
     gen uniform 100000 $d 3 u${d}_db100k.fbin; gen uniform 1024 $d 4 u${d}_q1k.fbin
-    for nq in 1 64 1024; do both $R/e2_dim.csv d$d u${d}_db100k.fbin u${d}_q1k.fbin $nq 10 $MAXT; done
+    for nq in 1 64 1024; do both $R/e2_dim.csv d$d u${d}_db100k.fbin u${d}_q1k.fbin $nq 10 $T14; done
   done
 fi
 
-# E3: k — uniform nb=200k d=128, all threads
+# E3: k — uniform nb=200k d=128, 14 threads
 if [[ " $E " == *" E3 "* ]]; then
   hdr $R/e3_k.csv
   for k in 1 10 100 1000; do for nq in 16 1024; do
-    both $R/e3_k.csv k$k u128_db.fbin u128_q.fbin $nq $k $MAXT; done; done
+    both $R/e3_k.csv k$k u128_db.fbin u128_q.fbin $nq $k $T14; done; done
 fi
 
-# E4: input families (clustered, ties) — nb=200k d=128 k=10
+# E4: input families (clustered, ties) — nb=200k d=128 k=10, 14 threads
 if [[ " $E " == *" E4 "* ]]; then
   hdr $R/e4_family.csv
   for fam in clustered ties; do
     gen $fam 200000 128 5 ${fam}_db.fbin; gen $fam 1024 128 6 ${fam}_q.fbin
-    for nq in 1 64 1024; do both $R/e4_family.csv $fam ${fam}_db.fbin ${fam}_q.fbin $nq 10 $MAXT; done
+    for nq in 1 64 1024; do both $R/e4_family.csv $fam ${fam}_db.fbin ${fam}_q.fbin $nq 10 $T14; done
   done
 fi
 

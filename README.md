@@ -39,6 +39,8 @@ Python 3.10, numpy 2.2.6, faiss-cpu 1.16.0 (pip wheel, OpenBLAS 0.3.15). Both pr
 pinned with `OMP_PROC_BIND=close OMP_PLACES=threads`, except where stated. Kernel: AVX2
 6 × 16, with 1 × 16 and 2 × 16 for nq = 1 and 2. The AVX-512 kernel cannot run on this
 machine; it was measured only on the [second machine](#second-machine-avx-512).
+E1–E4 use the current code; E5–E8 were run before tile buffers were kept between searches
+(see [Memory](#memory)).
 
 ## Input/output contract
 
@@ -131,45 +133,61 @@ Faiss time / our time at the same thread count (above 1 = we are faster):
 
 | nq | T=1 | 2 | 4 | 6 | 8 | 12 | 14 | 20 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 1.20 | 2.61 | 2.34 | 2.21 | 1.77 | 1.91 | 2.07 | 2.08 |
-| 4 | 3.89 | 3.60 | 1.99 | 2.11 | 2.35 | 1.96 | 2.05 | 2.25 |
-| 16 | 7.22 | 6.89 | 5.89 | 6.09 | 3.04 | 3.57 | 3.30 | 1.94 |
-| 64 | 10.82 | 11.48 | 10.58 | 6.51 | 8.27 | 5.46 | 6.57 | 6.80 |
-| 256 | 10.77 | 13.26 | 12.91 | 11.55 | 7.29 | 7.22 | 6.42 | 5.17 |
-| 1024 | 2.76 | 2.65 | 2.80 | 2.91 | 3.73 | 3.49 | 3.27 | 3.21 |
-| 4096 | 2.57 | 2.86 | 2.90 | 3.85 | 3.85 | 3.62 | 3.50 | 3.52 |
+| 1 | 1.17 | 2.40 | 2.58 | 2.19 | 2.31 | 1.93 | 2.05 | 1.87 |
+| 4 | 4.29 | 3.71 | 2.00 | 2.24 | 2.31 | 1.87 | 2.08 | 1.51 |
+| 16 | 7.18 | 7.86 | 5.90 | 6.19 | 3.33 | 3.65 | 2.72 | 5.04 |
+| 64 | 10.34 | 12.15 | 10.75 | 10.07 | 5.63 | 5.58 | 6.00 | 4.06 |
+| 256 | 11.19 | 13.44 | 13.25 | 11.18 | 7.42 | 6.87 | 6.39 | 6.91 |
+| 1024 | 2.53 | 2.67 | 2.84 | 2.89 | 3.58 | 3.43 | 3.27 | 3.92 |
+| 4096 | 2.64 | 2.87 | 2.76 | 3.05 | 3.95 | 3.44 | 3.33 | 3.54 |
 
-* **nq = 4 to 256**, where Faiss 1.16 uses its per-pair sequential path: 1.9–13.3× faster.
-* **nq ≥ 1024** (Faiss BLAS path): 2.6–3.9× faster.
-* **nq = 1, 1 thread:** 4.80 vs 5.74 ms here, but treat it as a tie: in a separate 9-round
+* **nq = 4 to 256**, where Faiss 1.16 uses its per-pair sequential path: 1.5–13.4× faster.
+* **nq ≥ 1024** (Faiss BLAS path): 2.5–4.0× faster.
+* **nq = 1, 1 thread:** 4.94 vs 5.78 ms here, but treat it as a tie: in a separate 9-round
   comparison the two were within 6% with overlapping ranges.
 * **Self-speedup** (over each library's own 1-thread time), ours / Faiss:
 
 | nq | T=2 | 4 | 6 | 8 | 12 | 14 | 20 |
 |---|---|---|---|---|---|---|---|
-| 1 | 1.57 / 0.72 | 1.79 / 0.92 | 1.84 / 1.00 | 1.24 / 0.84 | 1.63 / 1.02 | 1.43 / 0.83 | 1.53 / 0.88 |
-| 64 | 1.68 / 1.59 | 3.31 / 3.39 | 2.71 / 4.50 | 3.13 / 4.10 | 3.62 / 7.17 | 3.71 / 6.11 | 4.27 / 6.80 |
-| 4096 | 2.13 / 1.91 | 3.72 / 3.30 | 4.97 / 3.32 | 4.76 / 3.18 | 5.35 / 3.80 | 5.84 / 4.30 | 6.70 / 4.90 |
+| 1 | 1.60 / 0.78 | 1.92 / 0.87 | 1.55 / 0.83 | 1.70 / 0.86 | 1.75 / 1.06 | 1.70 / 0.97 | 1.41 / 0.88 |
+| 64 | 1.86 / 1.58 | 3.35 / 3.22 | 4.21 / 4.32 | 2.91 / 5.34 | 3.85 / 7.14 | 3.95 / 6.79 | 2.65 / 6.75 |
+| 4096 | 2.00 / 1.84 | 3.40 / 3.25 | 4.72 / 4.08 | 4.97 / 3.31 | 5.20 / 3.98 | 5.49 / 4.36 | 6.45 / 4.80 |
 
-  At nq = 64 Faiss scales better than we do, from a 1-thread time that is 10.8× longer
-  (309 vs 28.6 ms). WSL hides P- and E-cores, so T = 12 is not "P-cores only".
+  At nq = 64 Faiss scales better from 6 threads on, from a 1-thread time that is 10.3× longer
+  (301 vs 29.1 ms). The 20-thread column is the noisiest. WSL hides P- and E-cores, so T = 12 is not "P-cores only".
 
-### E2–E4: dimension, k, input family (20 threads)
+### E2–E4: dimension, k, input family (14 threads)
 
-| Experiment | Faiss time / our time |
-|---|---|
-| E2: d = 32, 128, 512 (nb = 100k; nq = 1, 64, 1024) | 1.5–8.5×, plus one outlier of 29.7× (d = 32, nq = 1) |
-| E3: k = 1, 10, 100, 1000 (nq = 16, 1024) | 1.5–3.4× |
-| E4: clustered and ties (nq = 1, 64, 1024) | 2.1–10.4× |
+Ours / Faiss in ms (Faiss time / our time). 14 threads, because earlier runs with all 20
+were too noisy. Only d = 32, nq = 1 (under 0.3 ms for both) still has a standard deviation above 15% of
+its median: read it as "faster", not as a precise ratio.
 
-These runs use all 20 threads and are noisy: in E2 and E3 the standard deviation often
-exceeds 15% of the median. Do not quote the extremes: E2's 8.5× (d = 128, nq = 1024) has
-Faiss at 423 ms with a minimum of 184 ms, and the d = 32 outlier has Faiss at 6.6 ms
-with a minimum of 3.9 ms. E3's k = 10, nq = 16 row (11.8 ms) is 3× slower than
-the same case in E1 (4.0 ms).
+E2, nb = 100k, k = 10:
 
-* **Unfavourable case, large k:** at nq = 1024 the lead falls from 3.3× (k = 10) to 2.1×
-  (k = 1000), as heap updates cost more.
+| d | nq = 1 | nq = 64 | nq = 1024 |
+|---|---|---|---|
+| d = 32 | 0.09 / 0.27 (3.1×) | 1.05 / 3.59 (3.4×) | 12.55 / 58.25 (4.6×) |
+| d = 128 | 1.10 / 2.96 (2.7×) | 3.45 / 18.25 (5.3×) | 45.93 / 139 (3.0×) |
+| d = 512 | 6.01 / 14.39 (2.4×) | 13.02 / 89.78 (6.9×) | 168 / 430 (2.6×) |
+
+E3:
+
+| k | nq = 16 | nq = 1024 |
+|---|---|---|
+| k = 1 | 3.81 / 13.26 (3.5×) | 81.18 / 226 (2.8×) |
+| k = 10 | 4.03 / 12.82 (3.2×) | 82.22 / 272 (3.3×) |
+| k = 100 | 4.26 / 15.72 (3.7×) | 96.73 / 274 (2.8×) |
+| k = 1000 | 8.77 / 12.64 (1.4×) | 159 / 311 (2.0×) |
+
+E4, k = 10:
+
+| family | nq = 1 | nq = 64 | nq = 1024 |
+|---|---|---|---|
+| clustered | 2.95 / 6.31 (2.1×) | 6.98 / 42.58 (6.1×) | 82.83 / 270 (3.3×) |
+| ties | 3.06 / 7.01 (2.3×) | 7.34 / 40.81 (5.6×) | 84.04 / 268 (3.2×) |
+
+* **Unfavourable case, large k:** the lead falls from 3.3× (k = 10) to 2.0× (k = 1000) at
+  nq = 1024, and from 3.2× to 1.4× at nq = 16, as heap updates cost more.
 
 ### E5: selector against a grid (20 threads)
 
@@ -207,7 +225,7 @@ a plain memory read of a same-sized array:
 
 One thread scans a database that fits in L2 at 64.5 GB/s, 2.9× its speed from RAM, so the
 kernel is not the limit. One thread already uses 21.6 of the at most 40.5 GB/s, which allows
-at most about 1.9× from more threads; E1's best nq = 1 self-speedup is 1.84×.
+at most about 1.9× from more threads; E1's best nq = 1 self-speedup is 1.92×.
 
 ### E8: over-decomposition (tried, not kept)
 
@@ -221,21 +239,26 @@ Extra memory of the search over the 79 E1–E4 cases:
 
 | | Ours, calculated | Ours, measured | Faiss, measured |
 |---|---|---|---|
-| Faiss BLAS path (24 cases) | 33 KiB – 3.0 MiB | 0 – 15.8 MiB | 5.1 – 41.2 MiB |
-| Faiss sequential path (55 cases) | 3 KiB – 2.7 MiB | 0 – 11.4 MiB | 0 – 10.5 MiB |
+| Faiss BLAS path (24 cases) | 33 KiB – 4.0 MiB | 0.0 – 3.8 MiB | 5.6 – 41.2 MiB |
+| Faiss sequential path (55 cases) | 3 KiB – 1.9 MiB | 0.0 – 2.3 MiB | 0.0 – 6.7 MiB |
 
 * *Calculated* (`tiled_working_bytes`) is the tile copies plus partial heaps. *Measured* is the
-  growth of peak RSS over 6 searches. It reads low or 0 when earlier setup already
-  set a higher peak, and it includes thread stacks and allocator overhead.
-* **Large batches:** we measured less than Faiss in 22 of 24 cases. E1 at nq = 4096: 0.3–4.2 MiB
-  against 19.5–20.2 MiB. At d = 512, 20 threads, nq = 1024 we measured **more**: 15.8 vs 5.8 MiB.
-* **Sequential-path cases:** results are mixed, and Faiss measured less than ours in
-  23 of 55 cases, so "memory efficient" is not a claim for that path.
-* **Memory grows with repeated searches.** At d = 512, nq = 1024, 20 threads: 6.1 MiB after
-  2 searches, 15.8 after 6, about 25 after 11, and no further growth up to 101 searches. The tile copy is
-  freed after each search and the sanitizer build reports no leak, so the likely cause is the
-  allocator not reusing freed aligned blocks (not confirmed). Keeping the tile copies
-  between searches would avoid it.
+  growth of peak RSS over 6 searches, the same way for both. It includes thread stacks and
+  allocator overhead, but reads low (even 0, or below the calculated size) when
+  earlier setup already set a higher peak.
+* **BLAS path:** we measured less than Faiss in all 24 cases. E1 at nq = 4096:
+  0.2–1.1 MiB against 19.4–20.3 MiB.
+* **Sequential path:** mixed. We measured less in 31 cases, the same in 11 and more in 13,
+  so "memory efficient" is not a claim for that path.
+* **Tile buffers are kept.** Each thread keeps its query-tile buffer between searches and only
+  grows it, instead of allocating and freeing it in every search. Peak growth at d = 512,
+  nb = 100k, nq = 4096, 20 threads (peak counter reset before the first search, 3 runs; calculated size 3.5 MiB):
+
+| Searches | Before | After |
+|---|---|---|
+| 1 | 3.9–4.1 MiB | 3.9 MiB |
+| 11 | 26.2–26.4 MiB | 4.5–4.6 MiB |
+| 101 | 26.2–26.4 MiB | 4.5–4.6 MiB |
 
 ### Second machine (AVX-512)
 
@@ -250,7 +273,7 @@ our packing are reported as preprocessing), outputs preallocated for both.
 Faiss here is the pip wheel with OpenBLAS 0.3.15; an MKL build of Faiss would
 likely be faster on the BLAS path, so we **don't claim general superiority** —
 our claim is for the constrained regime the brief suggests: **small/medium
-batches** (and, for large batches, less working memory than Faiss in most cases). Faiss's current `main` adds a
+batches** (and, on Faiss's BLAS path, less extra memory in every case we measured). Faiss's current `main` adds a
 database-parallel path for nq < threads that 1.16 doesn't use here; that would
 narrow the nq=1 gap.
 
@@ -262,6 +285,5 @@ narrow the nq=1 gap.
 ## Ideas for the remaining weeks / report
 * Run on a real dataset: SIFT1M via `read_fvecs` (`src/data.cpp`).
 * Replace the heap with a small sorted buffer / two-pass threshold for k ≥ 256.
-* Keep the tile copies between searches (see Memory).
 * Calibrate the selector's crossover empirically at install time.
 * Profile with `perf stat` (FLOP rate vs peak, cache misses) for the bottleneck section.
