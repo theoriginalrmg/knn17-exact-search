@@ -328,6 +328,26 @@ size_t tiled_working_bytes(size_t nq, size_t d, size_t k, const SearchParams& p)
 }
 
 // --------------------------------------------------------------- search ----
+// Query-tile buffer of one thread, kept between searches and only ever grown.
+// Allocating and freeing it in every search made the process grow.
+struct TileBuffer {
+    float* p = nullptr;
+    size_t bytes = 0;
+    TileBuffer() = default;
+    TileBuffer(const TileBuffer&) = delete;
+    TileBuffer& operator=(const TileBuffer&) = delete;
+    ~TileBuffer() { std::free(p); }
+    float* get(size_t need) {
+        if (need > bytes) {
+            std::free(p);
+            p = (float*)aligned_alloc64(need);
+            bytes = p ? need : 0;
+        }
+        return p;
+    }
+};
+static thread_local TileBuffer tile_buffer;
+
 SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
                           size_t k, float* D, idx_t* I, SearchParams p) {
     const size_t d = db.d, nb = db.nb;
@@ -365,7 +385,7 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
 #pragma omp parallel num_threads(p.nthreads)
     {
         const size_t tqp = p.tq;
-        float* Qt = (float*)aligned_alloc64(tqp * d * sizeof(float));
+        float* Qt = tile_buffer.get(tqp * d * sizeof(float));
         std::vector<float> thr(tqp);
         std::vector<float*> hdp(tqp);
         std::vector<idx_t*> hip(tqp);
@@ -396,7 +416,6 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
                     scan_block<int(MR)>(db, Qt, nqt_rows, b0, b1, hdp.data(), hip.data(), thr.data(), k);
             }
         }
-        std::free(Qt);
 
         // ---- finalise: merge chunks (if any), add ||x||^2, sort by policy
         std::vector<std::pair<float, idx_t>> cand(S * k);
