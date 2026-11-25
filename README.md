@@ -30,7 +30,18 @@ python3 scripts/analyze.py               # tables + plots
 # sanitizer build: cmake -S . -B build-asan -DKNN_SANITIZE=ON && cmake --build build-asan && ./build-asan/knn_test
 ```
 
-Versions used for the included results: Ubuntu 24.04, g++ 13.3, cmake 3.28,
+Which kernel produced which results:
+
+| Results | Machine | Kernel |
+|---|---|---|
+| E1 (`e1_batch.csv`, `fig_e1_*.png`) | i7-13650HX laptop, WSL2 Ubuntu 22.04, g++ 11.4, 20 threads, pinned (`OMP_PROC_BIND=close OMP_PLACES=threads`) | AVX2, 6 × 16 |
+| E2–E6 (`e2`–`e6` CSVs, `fig_e5_selector.png`) | 2-vCPU cloud VM (below), not pinned | AVX-512, 4 × 32 |
+
+The two sets must not be compared with each other. The numbers quoted under
+"Results" below are all from the cloud VM (AVX-512); the laptop E1 tables are in
+`results/summary.md`.
+
+Cloud VM versions: Ubuntu 24.04, g++ 13.3, cmake 3.28,
 Python 3.13, numpy, faiss-cpu 1.16.0 (pip wheel, bundles OpenBLAS 0.3.15),
 2-vCPU Intel Xeon @ 2.1 GHz (AVX-512), 7 GiB RAM, a shared cloud VM (so timings
 are noisy; we report median ± std over 5 reps).
@@ -71,9 +82,18 @@ far point swapped in, a wrong distance, and an unsorted row.
 2. **Packed database (preprocessing, timed separately):** rows grouped into
    panels of 16, stored dimension-major inside a panel, so one 64-byte load
    gives dimension t of 16 database rows. Padding rows get ‖y‖² = +∞ so they never win.
-3. **Register-blocked micro-kernel:** 4 queries × 32 database rows → 8 vector
-   accumulators; each step does 2 loads and 8 broadcast-FMAs (the inner loop of
-   a GEMM). Uses GCC/Clang vector extensions → AVX-512 or 2×AVX2 automatically.
+3. **Register-blocked micro-kernel** (the inner loop of a GEMM), chosen at compile
+   time; `MR` = queries per call:
+   * **AVX-512** (`__AVX512F__`): 4 queries × 32 rows → 8 accumulators, 2 loads and
+     8 broadcast-FMAs per step, written with GCC/Clang vector extensions.
+   * **AVX2 + FMA:** 6 queries × 16 rows in intrinsics → 12 accumulators + 2 loads
+     + 1 broadcast = 15 of the 16 registers (no spills in the inner loop, checked
+     with `objdump`). A 4 × 16 tile was also tried: slower at nq = 64 and 4096,
+     faster at nq = 1.
+   * Otherwise the 4 × 32 vector-extension code is the portable fallback. It is
+     correct but slow on AVX2: each 16-float vector becomes two registers, so the
+     8 accumulators alone fill the register file, and g++ 11 spills them to the
+     stack on every step.
 4. **Two-level tiling:** a database block of `tb` rows (sized to ½ L2) is kept hot
    while every 4-query group of a `tq`-query tile streams over it, so each
    database element fetched from memory is reused `tq` times.
@@ -93,7 +113,7 @@ far point swapped in, a wrong distance, and an unsorted row.
 
 ### D3 — tile / parallelism selector (`select_params`)
 * `tb` = rows such that `tb·d·4 B ≈ L2/2` (read from `sysconf`).
-* `tq` = 64 (shrunk when the tile + heaps exceed L2/4, and when nq is small).
+* `tq` = 64 rounded up to a multiple of `MR` (64 on AVX-512, 66 on AVX2; shrunk when the tile + heaps exceed L2/4, and when nq is small).
 * `S` (database splits): smallest S giving ≥ T tasks with ≤ 25% load imbalance,
   limited by blocks per chunk and a partial-heap memory budget (64 MiB).
   → **small batches become database-parallel** (each thread scans nb/S rows —
@@ -102,7 +122,13 @@ far point swapped in, a wrong distance, and an unsorted row.
 
 ## Results (from `results/summary.md`)
 
+Laptop (AVX2 kernel), E1:
+
 ![E1](results/fig_e1_latency.png)
+
+![E1 scaling](results/fig_e1_scaling.png)
+
+Cloud VM (AVX-512 kernel), including its earlier E1 run:
 
 * All runs of both libraries pass the checker (32 sampled queries per run).
 * **Small/medium batches (nq ≤ 256), where Faiss 1.16 uses its per-pair

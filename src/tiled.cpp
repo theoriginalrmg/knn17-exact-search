@@ -16,6 +16,17 @@
 #include <omp.h>
 #include <unistd.h>
 
+// Compile-time kernel choice: AVX-512 -> 4 x 32 tile (GCC vectors, also the
+// portable fallback); AVX2+FMA -> hand-written 6 x 16 tile.
+#ifdef __AVX512F__
+#define KNN_AVX2_KERNEL 0
+#elif defined(__AVX2__) && defined(__FMA__)
+#define KNN_AVX2_KERNEL 1
+#include <immintrin.h>
+#else
+#define KNN_AVX2_KERNEL 0
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -28,10 +39,17 @@
 
 namespace knn {
 
+// MR = queries per micro-kernel call (register rows), NP_MAX = panels per call.
+#if KNN_AVX2_KERNEL
+struct v16 { __m256 lo, hi; };  // one panel of results = two AVX2 registers
+constexpr size_t MR = 6;
+constexpr int NP_MAX = 1;
+#else
 typedef float v16 __attribute__((vector_size(64)));  // GCC/Clang vector ext.
-static_assert(sizeof(v16) == PANEL * sizeof(float), "panel = one vector");
-
-constexpr size_t MR = 4;  // queries per micro-kernel call (register rows)
+constexpr size_t MR = 4;
+constexpr int NP_MAX = 2;
+#endif
+static_assert(sizeof(v16) == PANEL * sizeof(float), "v16 holds one panel");
 constexpr float INF = std::numeric_limits<float>::infinity();
 
 static void* aligned_alloc64(size_t bytes) {
@@ -102,6 +120,38 @@ static inline void heap_init(float* hd, idx_t* hi, size_t k) {
 
 // ------------------------------------------------------- micro-kernel -----
 // acc[r][c] = <query r, database rows of panel c> for MR queries x NP panels.
+#if KNN_AVX2_KERNEL
+// 12 accumulators + 2 loads + 1 broadcast = 15 of the 16 AVX2 registers.
+// Accumulators are named locals (not an array) so they stay in registers.
+#define KNN_ROWS(X) X(0) X(1) X(2) X(3) X(4) X(5)
+static_assert(MR == 6, "KNN_ROWS must list exactly MR rows");
+
+template <int NP>
+static inline void micro_kernel(const float* __restrict Q, size_t d,
+                                const float* __restrict P, v16 acc[MR][NP]) {
+    static_assert(NP == 1, "the AVX2 tile is one panel wide");
+#define X(r)                                                   \
+    __m256 lo##r = _mm256_setzero_ps(), hi##r = _mm256_setzero_ps(); \
+    const float* q##r = Q + r * d;
+    KNN_ROWS(X)
+#undef X
+    for (size_t t = 0; t < d; t++) {
+        const __m256 blo = _mm256_load_ps(P + t * PANEL);
+        const __m256 bhi = _mm256_load_ps(P + t * PANEL + 8);
+        __m256 a;
+#define X(r)                              \
+    a = _mm256_broadcast_ss(q##r + t);    \
+    lo##r = _mm256_fmadd_ps(a, blo, lo##r); \
+    hi##r = _mm256_fmadd_ps(a, bhi, hi##r);
+        KNN_ROWS(X)
+#undef X
+    }
+#define X(r) acc[r][0] = {lo##r, hi##r};
+    KNN_ROWS(X)
+#undef X
+}
+#undef KNN_ROWS
+#else
 // Each step loads NP vectors of database values for dimension t and does
 // MR*NP broadcast-FMAs: the CPU analogue of the GEMM inner loop.
 template <int NP>
@@ -119,6 +169,7 @@ static inline void micro_kernel(const float* __restrict Q, size_t d,
         }
     }
 }
+#endif
 
 // Consume the micro-kernel output directly into the per-query heaps.
 // pd = ||y||^2 - 2<x,y>  (the ||x||^2 term is added after selection).
@@ -128,6 +179,19 @@ static inline void select_from_registers(v16 acc[MR][NP], const float* yn,
                                          idx_t** hi, float* thr, size_t k) {
     for (size_t r = 0; r < nrows; r++) {
         for (int c = 0; c < NP; c++) {
+#if KNN_AVX2_KERNEL
+            const __m256 two = _mm256_set1_ps(2.f), t = _mm256_set1_ps(thr[r]);
+            const float* y = yn + c * PANEL;
+            __m256 plo = _mm256_sub_ps(_mm256_load_ps(y), _mm256_mul_ps(two, acc[r][c].lo));
+            __m256 phi = _mm256_sub_ps(_mm256_load_ps(y + 8), _mm256_mul_ps(two, acc[r][c].hi));
+            // cheap vector filter: skip all 16 lanes if none beats the worst
+            __m256 any = _mm256_or_ps(_mm256_cmp_ps(plo, t, _CMP_LT_OQ),
+                                      _mm256_cmp_ps(phi, t, _CMP_LT_OQ));
+            if (_mm256_testz_ps(any, any)) continue;
+            alignas(32) float pd[PANEL];
+            _mm256_store_ps(pd, plo);
+            _mm256_store_ps(pd + 8, phi);
+#else
             v16 pd = *(const v16*)(yn + c * PANEL) - 2.f * acc[r][c];
             // cheap vector filter: skip all 16 lanes if none beats the worst
             v16 t = (v16){} + thr[r];
@@ -135,6 +199,7 @@ static inline void select_from_registers(v16 acc[MR][NP], const float* yn,
             bool any = false;
             for (size_t j = 0; j < PANEL; j++) any |= (m[j] != 0);
             if (!any) continue;
+#endif
             for (size_t j = 0; j < PANEL; j++) {
                 float v = pd[j];
                 // ids are scanned in increasing order inside a task, so a tie
@@ -180,10 +245,11 @@ SearchParams select_params(size_t nq, size_t nb, size_t d, size_t k,
     tb = std::min(tb, round_up(std::max<size_t>(nb, 1), 2 * PANEL));
     p.tb = tb;
 
-    // Query tile: 64 queries is enough to amortise one L2 block (16 reuses),
-    // but keep the tile itself + its heaps within ~L1..L2/4.
-    size_t tq = 64;
-    while (tq > MR && tq * (d * sizeof(float) + k * 12) > m.l2 / 4) tq /= 2;
+    // Query tile: about 64 queries (a multiple of MR) is enough to amortise one
+    // L2 block, but keep the tile itself + its heaps within ~L1..L2/4.
+    size_t tq = round_up(64, MR);
+    while (tq > MR && tq * (d * sizeof(float) + k * 12) > m.l2 / 4)
+        tq = std::max(MR, tq / 2 / MR * MR);
     tq = std::min(tq, round_up(std::max<size_t>(nq, 1), MR));
     p.tq = std::max(tq, MR);
 
@@ -276,14 +342,14 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
                     size_t rows = std::min(MR, nqt_rows - g);
                     const float* Qg = Qt + g * d;
                     size_t pp = b0;
-                    for (; pp + 2 <= b1; pp += 2) {
-                        v16 acc[MR][2];
-                        micro_kernel<2>(Qg, d, db.panels + pp * d * PANEL, acc);
-                        select_from_registers<2>(acc, db.norms + pp * PANEL,
-                                                 idx_t(pp * PANEL), rows, &hdp[g],
-                                                 &hip[g], &thr[g], k);
+                    for (; pp + NP_MAX <= b1; pp += NP_MAX) {
+                        v16 acc[MR][NP_MAX];
+                        micro_kernel<NP_MAX>(Qg, d, db.panels + pp * d * PANEL, acc);
+                        select_from_registers<NP_MAX>(acc, db.norms + pp * PANEL,
+                                                      idx_t(pp * PANEL), rows, &hdp[g],
+                                                      &hip[g], &thr[g], k);
                     }
-                    if (pp < b1) {
+                    if (NP_MAX > 1 && pp < b1) {
                         v16 acc[MR][1];
                         micro_kernel<1>(Qg, d, db.panels + pp * d * PANEL, acc);
                         select_from_registers<1>(acc, db.norms + pp * PANEL,

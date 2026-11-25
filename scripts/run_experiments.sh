@@ -9,9 +9,10 @@ R=results
 mkdir -p data $R
 REPS=${REPS:-5}
 MAXT=$(nproc)
-THREADS=$(python3 -c "t=1;l=[]
-while t<=$MAXT: l.append(t); t*=2
-print(' '.join(map(str,l if l[-1]==$MAXT else l+[$MAXT])))")
+# E1 thread counts for the i7-13650HX (6 P-cores = 12 threads, 8 E-cores, 20 total)
+THREADS="1 2 4 6 8 12 14 20"
+# same pinning for knn_bench and faiss_bench.py (both use OpenMP)
+export OMP_PROC_BIND=close OMP_PLACES=threads
 
 gen() {  # family n d seed file
   [ -f "data/$5" ] || $B gen --family "$1" --n "$2" --d "$3" --seed "$4" --out "data/$5"
@@ -34,7 +35,7 @@ E=${*:-E1 E2 E3 E4 E5 E6}
 if [[ " $E " == *" E1 "* ]]; then
   gen uniform 200000 128 1 u128_db.fbin; gen uniform 4096 128 2 u128_q.fbin
   hdr $R/e1_batch.csv
-  for T in $THREADS; do for nq in 1 4 16 64 256 1024 4096; do
+  for T in $THREADS; do [ "$T" -le "$MAXT" ] || continue; for nq in 1 4 16 64 256 1024 4096; do
     both $R/e1_batch.csv batch u128_db.fbin u128_q.fbin $nq 10 $T; done; done
 fi
 
@@ -68,7 +69,7 @@ if [[ " $E " == *" E5 "* ]]; then
   hdr $R/e5_selector.csv
   for nq in 1 4 16 64 256 1024; do
     $B run --db data/u128_db.fbin --q data/u128_q.fbin --nq $nq --k 10 --threads $MAXT --reps $REPS --check 0 --label auto | tee -a $R/e5_selector.csv
-    for S in 1 2 4; do for tq in 4 16 64; do for tb in 256 2048 16384; do
+    for S in 1 2 4 8 16 20; do [ "$S" -le "$MAXT" ] || continue; for tq in 4 16 64; do for tb in 256 2048 16384; do
       $B run --db data/u128_db.fbin --q data/u128_q.fbin --nq $nq --k 10 --threads $MAXT --reps 3 --check 0 \
          --S $S --tq $tq --tb $tb --label grid >> $R/e5_selector.csv
     done; done; done
