@@ -277,13 +277,3 @@ batches** (and, on Faiss's BLAS path, less extra memory in every case we measure
 database-parallel path for nq < threads that 1.16 doesn't use here; that would
 narrow the nq=1 gap.
 
-## Suggested team split (3 people)
-* Baseline/correctness: D1, checker, tests, tie policy, data families.
-* Parallel implementation: packing, micro-kernel, heaps, OpenMP tasks, merge.
-* Evaluation: D3 selector + ablation, Faiss harness, experiments, plots, report.
-
-## Ideas for the remaining weeks / report
-* Run on a real dataset: SIFT1M via `read_fvecs` (`src/data.cpp`).
-* Replace the heap with a small sorted buffer / two-pass threshold for k ≥ 256.
-* Calibrate the selector's crossover empirically at install time.
-* Profile with `perf stat` (FLOP rate vs peak, cache misses) for the bottleneck section.
