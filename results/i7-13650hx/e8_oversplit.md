@@ -1,5 +1,7 @@
 # E8: over-splitting the database in the selector (tried, not kept)
 
+Machine: i7-13650HX laptop (see machine.txt in this folder).
+
 **Result:** giving each thread about 4 database chunks makes nq = 64 at 8 threads
 19–24% faster, but it is more than 5% slower in other cases, so it was removed.
 The selector is unchanged.

@@ -1,0 +1,14 @@
+machine: i9-14900hx laptop
+cpu: Intel Core i9-14900HX (spec: 8 P-cores + 16 E-cores, 32 threads; AVX2 + FMA, no AVX-512)
+cores/threads seen by the OS: 32 logical CPUs (E5 ran at nproc = 32 threads)
+l2 (sysconf): 4 MiB (from the selector's tile size tb = 4096 at d = 128)
+ram: unknown, not recorded
+os: unknown, not recorded
+compiler: unknown, not recorded
+python / numpy / faiss-cpu: unknown, not recorded
+pinning: OMP_PROC_BIND=close OMP_PLACES=threads (set by run_experiments.sh at that commit)
+
+code that produced each result:
+  E1-E7   e471e72  (results added in commit 015206a; that version of run_experiments.sh
+                   only knew thread counts up to 20, so E1 stops at 20 threads)
+Fill in the unknown fields from the machine that ran it (scripts/machine_info.sh prints them).

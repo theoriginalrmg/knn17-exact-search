@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Reproduces every table/figure in results/. Usage: scripts/run_experiments.sh [E1 E2 ...]
+# Reproduces every table/figure. Usage: scripts/run_experiments.sh [-o DIR] [E1 E2 ...]
+# Results go to DIR (default results/<hostname>), with a machine.txt describing
+# this machine and a log line per run. Then: python3 scripts/analyze.py DIR
 # Requires: build/ (cmake), python3 with numpy + faiss-cpu.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 B=./build/knn_bench
 F="python3 bench/faiss_bench.py"
-R=results
-mkdir -p data $R
+R=results/$(hostname)
+if [ "${1:-}" = "-o" ]; then R=${2:?usage: scripts/run_experiments.sh [-o DIR] [E1 E2 ...]}; shift 2; fi
+mkdir -p data "$R"
+[ -f "$R/machine.txt" ] || scripts/machine_info.sh > "$R/machine.txt"
 REPS=${REPS:-5}
 MAXT=$(nproc)
 # E1 thread counts; those above nproc are skipped (i7-13650HX: 20, i9-14900HX: 32)
@@ -32,6 +36,7 @@ both() {  # csv label db q nq k T
 hdr() { $B header > "$1"; }
 
 E=${*:-E1 E2 E3 E4 E5 E6 E7 E9 E10 E11}
+echo "run $(date '+%Y-%m-%d %H:%M') experiments: $E; git $(git rev-parse --short HEAD)$(git status --porcelain --untracked-files=no | grep -q . && echo ' + uncommitted changes')" >> "$R/machine.txt"
 
 # E1: query batch size x threads (main result) — uniform, nb=200k, d=128, k=10
 if [[ " $E " == *" E1 "* ]]; then

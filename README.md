@@ -17,8 +17,10 @@ bench/bandwidth.cpp      STREAM-style memory read benchmark (E7)
 bench/faiss_bench.py     Faiss IndexFlatL2 baseline with identical CSV columns
 scripts/run_experiments.sh   reproduces E1–E7 and E9–E11
 scripts/e8_oversplit.py      E8, run by hand (steps at the top of the script)
-scripts/analyze.py       results/*.csv -> results/summary.md + figures
-results/                 laptop results: raw CSVs, summary.md, figures, e8_oversplit.md
+scripts/analyze.py       DIR/*.csv -> DIR/summary.md + figures
+scripts/machine_info.sh  describes this machine (written to DIR/machine.txt)
+results/i7-13650hx/      i7 laptop: E1–E11 (all results discussed below), machine.txt
+results/i9-14900hx/      i9 laptop: E1–E7, machine.txt
 results_2core_vm/        older results from the 2-vCPU cloud VM (AVX-512)
 ```
 
@@ -28,25 +30,26 @@ results_2core_vm/        older results from the 2-vCPU cloud VM (AVX-512)
 # deps: g++ >= 9 (OpenMP), cmake >= 3.16; for the baseline: pip install numpy faiss-cpu matplotlib
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 ./build/knn_test                         # all correctness tests
-scripts/run_experiments.sh               # E1..E7, E9..E11; or e.g. "scripts/run_experiments.sh E1"
+scripts/run_experiments.sh -o results/i7-13650hx          # E1..E7, E9..E11; or add e.g. E1 E5
+# without -o the folder is results/<hostname>; it gets a machine.txt and a line per run
 # E9 needs SIFT1M in data/sift/ (sift_base.fvecs, sift_query.fvecs from http://corpus-texmex.irisa.fr/); skipped otherwise
-python3 scripts/analyze.py               # tables + plots
+python3 scripts/analyze.py results/i7-13650hx             # tables + plots in that folder
 # sanitizer build: cmake -S . -B build-asan -DKNN_SANITIZE=ON && cmake --build build-asan && ./build-asan/knn_test
 ```
 
-All results in `results/` (E1–E8) are from one machine: Intel i7-13650HX laptop (6 P-cores
-+ 8 E-cores, 20 threads), WSL2 Ubuntu 22.04, 7 GiB RAM visible, g++ 11.4, cmake 3.22,
-Python 3.10, numpy 2.2.6, faiss-cpu 1.16.0 (pip wheel, OpenBLAS 0.3.15). Both programs are
-pinned with `OMP_PROC_BIND=close OMP_PLACES=threads`, except where stated. Kernel: AVX2
-6 × 16, with 1 × 16 and 2 × 16 for nq = 1 and 2. The AVX-512 kernel cannot run on this
-machine; it was measured only on the [second machine](#second-machine-avx-512).
-E1–E4 use the current code; E5–E8 were run before tile buffers were kept between searches
-(see [Memory](#memory)).
+Results are kept in one folder per machine, each with a `machine.txt` (CPU, cores/threads,
+RAM, OS, compiler, Faiss version, and the git commit behind each experiment):
 
-**Note on `results/`:** the E1–E8 numbers quoted below are from the i7 run. The E1–E7 CSVs,
-figures and `summary.md` in `results/` have since been replaced by a run on an i9-14900HX
-(commit 015206a), which this text does not describe yet. E9–E11 (and their sections in
-`summary.md`) are from the i7, with the current code.
+| Folder | Machine | Experiments | Discussed below |
+|---|---|---|---|
+| `results/i7-13650hx/` | i7-13650HX laptop (6 P + 8 E cores, 20 threads), WSL2 Ubuntu 22.04, g++ 11.4, faiss-cpu 1.16.0 | E1–E11 | all results sections |
+| `results/i9-14900hx/` | i9-14900HX laptop (8 P + 16 E cores, 32 threads); OS, RAM, compiler not recorded | E1–E7 | [one section](#i9-14900hx-e1e7), not described in detail |
+| `results_2core_vm/` | 2-vCPU cloud VM, AVX-512, older code | E1–E6 | [one section](#second-machine-avx-512-2-vcpu-cloud-vm) |
+
+On the i7, both programs are pinned with `OMP_PROC_BIND=close OMP_PLACES=threads`. Kernel:
+AVX2 6 × 16, with 1 × 16 and 2 × 16 for nq = 1 and 2. The AVX-512 kernel cannot run on
+either laptop. On the i7, E1–E4 and E9–E11 use the tile buffers kept between searches;
+E5–E8 were run before that change (see [Memory](#memory-i7-13650hx)).
 
 ## Input/output contract
 
@@ -61,7 +64,7 @@ figures and `summary.md` in `results/` have since been replaced by a run on an i
 ### D1 — reference + checker (`src/reference.cpp`)
 `reference_search` computes every distance in **double precision** directly as
 Σ(x−y)² (no norm expansion → no cancellation error), then `partial_sort`s with
-the tie policy. It is slow on purpose (22–25 ms/query at nb=200k, d=128 on the laptop, E6) — it's
+the tie policy. It is slow on purpose (22–25 ms/query at nb=200k, d=128 on the i7-13650HX, E6) — it's
 ground truth.
 
 `check_results` decides if any result is exact. Floating-point means the fast
@@ -137,17 +140,19 @@ far point swapped in, a wrong distance, and an unsorted row.
   the only way to use all cores for 1 query), **large batches become
   query-parallel** (no partial heaps to merge).
 
-## Results (from `results/summary.md`)
+## Results
+
+Every section below names its machine. The i7 tables are in `results/i7-13650hx/summary.md`.
 
 Times are medians of 5 repetitions (E7: 5 rounds; E8: see its file). Unless stated:
 uniform data, nb = 200k, d = 128, k = 10. All 158 runs in E1–E4 (both libraries)
 pass the checker (up to 32 sampled queries per run).
 
-### E1: batch size × threads
+### E1: batch size × threads (i7-13650HX)
 
-![E1](results/fig_e1_latency.png)
+![E1](results/i7-13650hx/fig_e1_latency.png)
 
-![E1 scaling](results/fig_e1_scaling.png)
+![E1 scaling](results/i7-13650hx/fig_e1_scaling.png)
 
 Faiss time / our time at the same thread count (above 1 = we are faster):
 
@@ -176,7 +181,7 @@ Faiss time / our time at the same thread count (above 1 = we are faster):
   At nq = 64 Faiss scales better from 6 threads on, from a 1-thread time that is 10.3× longer
   (301 vs 29.1 ms). The 20-thread column is the noisiest. WSL hides P- and E-cores, so T = 12 is not "P-cores only".
 
-### E2–E4: dimension, k, input family (14 threads)
+### E2–E4: dimension, k, input family (i7-13650HX, 14 threads)
 
 Ours / Faiss in ms (Faiss time / our time). 14 threads, because earlier runs with all 20
 were too noisy. Only d = 32, nq = 1 (under 0.3 ms for both) still has a standard deviation above 15% of
@@ -209,9 +214,9 @@ E4, k = 10:
 * **Unfavourable case, large k:** the lead falls from 3.3× (k = 10) to 2.0× (k = 1000) at
   nq = 1024, and from 3.2× to 1.4× at nq = 16, as heap updates cost more.
 
-### E5: selector against a grid (20 threads)
+### E5: selector against a grid (i7-13650HX, 20 threads)
 
-![E5](results/fig_e5_selector.png)
+![E5](results/i7-13650hx/fig_e5_selector.png)
 
 * Grid: S ∈ {1, 2, 4, 8, 16, 20} × tq ∈ {4, 16, 64} (rounded up to 6, 18, 66) × tb ∈
   {256, 2048, 16384} = 54 configs per nq.
@@ -221,13 +226,13 @@ E4, k = 10:
   For nq ≤ 16 it picks S = 20 while S = 8 was fastest; a smaller S for tiny batches
   is the main remaining gap.
 
-### E6: sequential double-precision reference
+### E6: sequential double-precision reference (i7-13650HX)
 
 24.9 ms for 1 query, 21.9 ms per query for 16.
 
-### E7: is nq = 1 limited by memory bandwidth?
+### E7: is nq = 1 limited by memory bandwidth? (i7-13650HX)
 
-![E7](results/fig_e7_bandwidth.png)
+![E7](results/i7-13650hx/fig_e7_bandwidth.png)
 
 Yes. From 1 to 14 threads our nq = 1 scan (packed database bytes / time) runs at 90–103% of
 a plain memory read of a same-sized array:
@@ -247,11 +252,11 @@ One thread scans a database that fits in L2 at 64.5 GB/s, 2.9× its speed from R
 kernel is not the limit. One thread already uses 21.6 of the at most 40.5 GB/s, which allows
 at most about 1.9× from more threads; E1's best nq = 1 self-speedup is 1.92×.
 
-### E8: over-decomposition (tried, not kept)
+### E8: over-decomposition, tried and not kept (i7-13650HX)
 
 Giving each thread about 4 database chunks made nq = 64 at 8 threads 19–24% faster, but was
 up to 46% slower at k = 1000, and a restricted version was up to 23% slower at 6 threads,
-so the selector was left unchanged. Details: [results/e8_oversplit.md](results/e8_oversplit.md).
+so the selector was left unchanged. Details: [results/i7-13650hx/e8_oversplit.md](results/i7-13650hx/e8_oversplit.md).
 
 ### E9–E11 (i7-13650HX, current code, 14 threads)
 
@@ -313,7 +318,7 @@ nb = 200k, d = 128, k = 10. All runs pass the checker.
   norm expansion lose most digits; non-strict then matched the reference in 1 of 389 rows,
   strict in all of them, by rescanning every query.
 
-### Memory
+### Memory (i7-13650HX)
 
 Extra memory of the search over the 79 E1–E4 cases:
 
@@ -340,10 +345,19 @@ Extra memory of the search over the 79 E1–E4 cases:
 | 11 | 26.2–26.4 MiB | 4.5–4.6 MiB |
 | 101 | 26.2–26.4 MiB | 4.5–4.6 MiB |
 
-### Second machine (AVX-512)
+### i9-14900HX (E1–E7)
+
+A teammate's run of E1–E7 on an i9-14900HX laptop (32 threads), with the code of commit
+e471e72: the same code as the i7's E1–E4, but newer than the code behind the i7's E5–E7.
+That version of the script only went up to 20 threads in E1, and RAM, OS, compiler and
+Faiss version were not recorded (see its `machine.txt`). Its tables are in
+[results/i9-14900hx/summary.md](results/i9-14900hx/summary.md); they are not discussed in
+this README. Do not mix its numbers with the i7's.
+
+### Second machine (AVX-512): 2-vCPU cloud VM
 
 A shared 2-vCPU cloud VM (Xeon 2.1 GHz, AVX-512 4 × 32 kernel, Ubuntu 24.04, g++ 13.3, not
-pinned, noisy), earlier code. Do not compare its times with the laptop's. E1 there: 0.96×
+pinned, noisy), earlier code. Do not compare its times with the laptops'. E1 there: 0.96×
 (nq = 1, 1 thread) to 8.8× against Faiss; 2.5–3.1× for nq ≥ 1024; calculated working memory at most 80 KiB
 in E1. Full tables: [results_2core_vm/summary.md](results_2core_vm/summary.md).
 

@@ -2,7 +2,7 @@ build/
 build-asan/
 data/
 *.res
-results/run.log
+results/*/run.log
 __pycache__/
 CLAUDE.md
 .claude/

@@ -1,0 +1,19 @@
+machine: i7-13650hx laptop
+cpu spec: Intel Core i7-13650HX, 6 P-cores + 8 E-cores, 20 threads; AVX2 + FMA, no AVX-512
+cpu: 13th Gen Intel(R) Core(TM) i7-13650HX
+cores/threads seen by the OS: 1 socket(s) x 10 cores x 2 threads = 20 logical CPUs
+l2 (getconf): 1280 KiB
+ram: 7.6 GiB visible
+os: Ubuntu 22.04.5 LTS, kernel 6.6.87.2-microsoft-standard-WSL2, WSL2 (core types and host pinning are hidden)
+compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0; cmake version 3.22.1
+python: 3.10.12, numpy 2.2.6, faiss-cpu 1.16.0
+git commit when this file was written: b8878e6 (plus the uncommitted move into this folder)
+openblas: 0.3.15 (bundled in the faiss-cpu wheel)
+windows: Windows 11 Home, power plan Ultimate Performance, on mains power
+pinning: OMP_PROC_BIND=close OMP_PLACES=threads (both libraries)
+
+code that produced each result (the commit that added the CSVs; code = that commit's tree):
+  E1-E4   e471e72  (tile buffers kept between searches; E2-E4 at 14 threads)
+  E5-E7   3b5b8ac  (before tile buffers were kept between searches)
+  E8      e2dc468  (see e8_oversplit.md; selector rule applied by hand)
+  E9-E11  b8878e6  (SIFT1M, heap vs buffer selection, strict mode)

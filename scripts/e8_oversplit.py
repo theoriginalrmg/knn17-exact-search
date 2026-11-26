@@ -1,8 +1,8 @@
-# E8: old vs new selector (over-splitting, tried and not kept; see results/e8_oversplit.md).
+# E8: old vs new selector (over-splitting, tried and not kept; see results/i7-13650hx/e8_oversplit.md).
 # Needs two knn_bench binaries and the E1 data (scripts/run_experiments.sh E1). From the
 # project root, with the normal build in build/:
 #   1. cp build/knn_bench /tmp/knn_old
-#   2. paste results/e8_oversplit_rule.txt into select_params (src/tiled.cpp), just above
+#   2. paste results/i7-13650hx/e8_oversplit_rule.txt into select_params (src/tiled.cpp), just above
 #      "while (S > 1 && size_t(S) * nq * k * 12 > mem_budget) S--;"
 #   3. cmake --build build -j && ./build/knn_test && cp build/knn_bench /tmp/knn_new
 #   4. remove the block again and rebuild
