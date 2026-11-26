@@ -1,0 +1,29 @@
+impl,label,nb,nq,d,k,threads,params,preprocess_s,median_s,min_s,std_s,qps,peak_delta_MiB,working_KiB,check
+tiled,batch,200000,1,128,10,1,tq=4 tb=2048 S=1 T=1 mr=4 sel=heap (query-parallel),0.103564,0.009274,0.008941,0.000383,107.8,0.00,2.0,PASS(1/1) strict 1/1
+faiss,batch,200000,1,128,10,1,IndexFlatL2 path=seq,0.079851,0.012198,0.011265,0.000538,82.0,0.10,0.0,PASS
+tiled,batch,200000,4,128,10,1,tq=4 tb=2048 S=1 T=1 mr=4 sel=heap (query-parallel),0.084338,0.011707,0.010387,0.000594,341.7,0.00,2.0,PASS(4/4) strict 4/4
+faiss,batch,200000,4,128,10,1,IndexFlatL2 path=seq,0.068945,0.037707,0.035569,0.002292,106.1,0.00,0.0,PASS
+tiled,batch,200000,16,128,10,1,tq=16 tb=2048 S=1 T=1 mr=4 sel=heap (query-parallel),0.122959,0.022303,0.021541,0.000738,717.4,0.00,8.1,PASS(16/16) strict 16/16
+faiss,batch,200000,16,128,10,1,IndexFlatL2 path=seq,0.072871,0.147668,0.138231,0.006847,108.4,0.10,0.0,PASS
+tiled,batch,200000,64,128,10,1,tq=64 tb=2048 S=1 T=1 mr=4 sel=heap (query-parallel),0.114595,0.063848,0.062975,0.000520,1002.4,0.00,32.2,PASS(32/32) strict 32/32
+faiss,batch,200000,64,128,10,1,IndexFlatL2 path=seq,0.077289,0.586007,0.331691,0.164849,109.2,0.10,0.0,PASS
+tiled,batch,200000,256,128,10,1,tq=64 tb=2048 S=1 T=1 mr=4 sel=heap (query-parallel),0.083980,0.188620,0.181388,0.016589,1357.2,0.00,32.2,PASS(32/32) strict 32/32
+faiss,batch,200000,256,128,10,1,IndexFlatL2 path=seq,0.062907,1.515802,1.278046,0.238749,168.9,0.10,0.0,PASS
+tiled,batch,200000,1024,128,10,1,tq=64 tb=2048 S=1 T=1 mr=4 sel=heap (query-parallel),0.114160,0.788792,0.761232,0.085275,1298.2,0.00,32.2,PASS(32/32) strict 32/32
+faiss,batch,200000,1024,128,10,1,IndexFlatL2 path=blas,0.068606,2.361275,2.054256,0.194447,433.7,5.75,16384.0,PASS
+tiled,batch,200000,4096,128,10,1,tq=64 tb=2048 S=1 T=1 mr=4 sel=heap (query-parallel),0.081141,2.881512,2.712827,0.104753,1421.5,0.00,32.2,PASS(32/32) strict 32/32
+faiss,batch,200000,4096,128,10,1,IndexFlatL2 path=blas,0.080443,9.641228,9.286914,0.197914,424.8,19.38,16384.0,PASS
+tiled,batch,200000,1,128,10,2,tq=4 tb=2048 S=2 T=2 mr=4 sel=heap (db-parallel),0.043400,0.005216,0.004422,0.000508,191.7,0.00,4.3,PASS(1/1) strict 1/1
+faiss,batch,200000,1,128,10,2,IndexFlatL2 path=seq,0.066827,0.015248,0.013013,0.001284,65.6,1.63,0.0,PASS
+tiled,batch,200000,4,128,10,2,tq=4 tb=2048 S=2 T=2 mr=4 sel=heap (db-parallel),0.048712,0.004350,0.003424,0.000780,919.5,0.00,5.0,PASS(4/4) strict 4/4
+faiss,batch,200000,4,128,10,2,IndexFlatL2 path=seq,0.071082,0.015842,0.009632,0.003920,252.5,0.00,0.0,PASS
+tiled,batch,200000,16,128,10,2,tq=16 tb=2048 S=2 T=2 mr=4 sel=heap (db-parallel),0.047815,0.008822,0.008375,0.000365,1813.7,0.00,19.9,PASS(16/16) strict 16/16
+faiss,batch,200000,16,128,10,2,IndexFlatL2 path=seq,0.064655,0.036811,0.030432,0.014243,434.6,0.11,0.0,PASS
+tiled,batch,200000,64,128,10,2,tq=64 tb=2048 S=2 T=2 mr=4 sel=heap (db-parallel),0.064034,0.029552,0.028219,0.000857,2165.7,0.10,79.5,PASS(32/32) strict 32/32
+faiss,batch,200000,64,128,10,2,IndexFlatL2 path=seq,0.071100,0.196542,0.132318,0.033847,325.6,0.11,0.0,PASS
+tiled,batch,200000,256,128,10,2,tq=64 tb=2048 S=1 T=2 mr=4 sel=heap (query-parallel),0.058301,0.111409,0.098843,0.012745,2297.8,0.01,64.5,PASS(32/32) strict 32/32
+faiss,batch,200000,256,128,10,2,IndexFlatL2 path=seq,0.065411,0.626540,0.533374,0.122826,408.6,0.11,0.0,PASS
+tiled,batch,200000,1024,128,10,2,tq=64 tb=2048 S=1 T=2 mr=4 sel=heap (query-parallel),0.052255,0.402933,0.368383,0.029985,2541.4,0.11,64.5,PASS(32/32) strict 32/32
+faiss,batch,200000,1024,128,10,2,IndexFlatL2 path=blas,0.076196,1.330705,1.100382,0.209310,769.5,5.91,16384.0,PASS
+tiled,batch,200000,4096,128,10,2,tq=64 tb=2048 S=1 T=2 mr=4 sel=heap (query-parallel),0.045738,1.615398,1.486199,0.080508,2535.6,0.01,64.5,PASS(32/32) strict 32/32
+faiss,batch,200000,4096,128,10,2,IndexFlatL2 path=blas,0.066387,6.012647,5.257569,0.520850,681.2,19.79,16384.0,PASS
