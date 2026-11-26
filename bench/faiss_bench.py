@@ -46,8 +46,8 @@ ts.sort(); med = ts[len(ts) // 2]; sd = float(np.std(ts, ddof=1)) if len(ts) > 1
 path = "blas" if nq * d >= faiss.cvar.distance_compute_blas_threshold else "seq"
 work = 4096 * 1024 * 4 if path == "blas" else 0
 delta = max(0, peak1 - max(rss0, peak0))
-print(f"faiss,{a.label},{nb},{nq},{d},{k},{T},IndexFlatL2 path={path},{pre:.6f},{med:.6f},{ts[0]:.6f},"
-      f"{sd:.6f},{nq/med:.1f},{delta/1048576:.2f},{work/1024:.1f},see-check")
+print(f"faiss,{a.label},{nb},{nq},{d},{k},{T},IndexFlatL2 path={path},{pre:.6f},{med:.9f},{ts[0]:.9f},"
+      f"{sd:.9f},{nq/med:.1f},{delta/1048576:.2f},{work/1024:.1f},see-check")
 if a.save_res:
     with open(a.save_res, "wb") as f:
         np.array([nq, k], np.int32).tofile(f); D.tofile(f); I.tofile(f)

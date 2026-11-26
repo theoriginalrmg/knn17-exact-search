@@ -184,6 +184,7 @@ if e11:
 # ------------------------------------------------------------------ E7 ----
 bwp = os.path.join(R, "e7_bandwidth.csv")
 e7 = load("e7_scan.csv")
+raw_e7 = list(csv.DictReader(open(os.path.join(R, "e7_scan.csv")))) if e7 else []
 if e7 and os.path.exists(bwp):
     bw, sc = defaultdict(list), defaultdict(list)
     with open(bwp) as f:
@@ -201,9 +202,15 @@ if e7 and os.path.exists(bwp):
         a, b, c = bw[T, 1024], bw[T, 99], sc["scan", T]
         out.append(f"| {T} | {med(a):.1f} ({rng(a)}) | {med(b):.1f} ({rng(b)}) | {med(c):.1f} ({rng(c)}) | "
                    f"{100*med(c)/med(a):.0f}% | {100*med(c)/med(b):.0f}% |")
-    if sc["incache", 1]:
+    ic = [r for r in raw_e7 if r["label"] == "incache"]
+    if ic and all(len(r["median_s"].split(".")[1]) > 6 for r in ic):
         c = sc["incache", 1]
-        out.append(f"\nIn-cache scan (2000 rows, fits L2), 1 thread: {med(c):.1f} GB/s ({rng(c)}).")
+        us = sorted(float(r["median_s"]) * 1e6 for r in ic)
+        out.append(f"\nIn-cache scan (2000 rows, fits L2), 1 thread: {med(c):.1f} GB/s ({rng(c)}); "
+                   f"one search takes {us[0]:.2f}–{us[-1]:.2f} µs.")
+    elif ic:
+        out.append("\nIn-cache scan: not reported. These rows were written by an older knn_bench that "
+                   "rounded times to whole µs, and one search takes ~13 µs (±7% per step); rerun E7.")
     out.append("")
     fig, ax = plt.subplots(figsize=(5.2, 3.2))
     ax.plot(Ts, [med(bw[T, 1024]) for T in Ts], color=MUTED, lw=2, marker="^", ms=5, label="memory read, 1 GiB")

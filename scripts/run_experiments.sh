@@ -93,7 +93,8 @@ fi
 
 # E7: is nq=1 limited by memory bandwidth? STREAM-style read vs our nq=1 scan,
 # same threads and pinning. 1024 MiB = far above L3; 99 MiB = packed db size.
-# "incache": 1 thread on a 2000-row db (1 MiB, fits L2) = speed without RAM.
+# "incache": 1 thread on a 2000-row db (1 MiB, fits L2) = speed without RAM. One search takes
+# ~13 us, so knn_bench prints times in ns (older CSVs rounded them to whole us, +-7% here).
 if [[ " $E " == *" E7 "* ]]; then
   gen uniform 200000 128 1 u128_db.fbin; gen uniform 4096 128 2 u128_q.fbin
   gen uniform 2000 128 1 u128_db2k.fbin

@@ -257,4 +257,4 @@ Median of 5 rounds (range), GB/s = 10^9 bytes/s. Scan rate = packed database byt
 | 24 | 76.2 (75.6–76.8) | 99.6 (80.4–110.0) | 79.8 (76.4–91.6) | 105% | 80% |
 | 32 | 75.5 (74.1–76.4) | 86.5 (77.2–96.5) | 74.1 (55.8–81.8) | 98% | 86% |
 
-In-cache scan (2000 rows, fits L2), 1 thread: 73.7 GB/s (68.8–86.0).
+In-cache scan: not reported. These rows were written by an older knn_bench that rounded times to whole µs, and one search takes ~13 µs (±7% per step); rerun E7.

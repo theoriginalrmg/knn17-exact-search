@@ -171,7 +171,7 @@ int main(int argc, char** argv) {
     if (a.count("save-res")) save_res(a["save-res"], nq, k, D.data(), I.data());
 
     std::string params = impl == "tiled" ? p.describe() : std::string("sequential");
-    std::printf("%s,%s,%zu,%zu,%zu,%zu,%d,%s,%.6f,%.6f,%.6f,%.6f,%.1f,%.2f,%.1f,%s\n", impl.c_str(),
+    std::printf("%s,%s,%zu,%zu,%zu,%zu,%d,%s,%.6f,%.9f,%.9f,%.9f,%.1f,%.2f,%.1f,%s\n", impl.c_str(),
                 get(a, "label", "").c_str(), nb, nq, d, k, impl == "ref" ? 1 : T, params.c_str(), pre, med,
                 ts.front(), sd, nq / med, peak_delta / 1048576.0, work / 1024.0, chk.c_str());
     return 0;

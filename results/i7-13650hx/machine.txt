@@ -7,3 +7,4 @@ compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0; cmake version 3.22.1
 python: 3.10.12, numpy 2.2.6, faiss-cpu 1.16.0
 git commit: b8a0944 + uncommitted changes
 run 2026-11-26 14:30 experiments: E1 E2 E3 E4 E5 E6 E7 E9 E10 E11; git b8a0944 + uncommitted changes
+in-cache rows rerun 2026-11-26 with ns timing (5 x 501 reps), git daded83 + uncommitted changes

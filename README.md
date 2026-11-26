@@ -19,9 +19,9 @@ scripts/run_experiments.sh   reproduces E1–E7 and E9–E11
 scripts/e8_oversplit.py      E8, run by hand (steps at the top of the script)
 scripts/analyze.py       DIR/*.csv -> DIR/summary.md + figures
 scripts/machine_info.sh  describes this machine (written to DIR/machine.txt)
-results/i7-13650hx/      i7 laptop: E1–E11 (all results discussed below), machine.txt
-results/i9-14900hx/      i9 laptop: E1–E7, machine.txt
-results_2core_vm/        older results from the 2-vCPU cloud VM (AVX-512)
+results/i7-13650hx/      i7 laptop: E1–E11, machine.txt
+results/i9-14900hx/      i9 laptop: E1–E7, E9–E11 (no E8), machine.txt
+results/cloud-vm-avx512/ 2-vCPU cloud VM with AVX-512: E1, machine.txt
 ```
 
 ## Build & run
@@ -40,16 +40,17 @@ python3 scripts/analyze.py results/i7-13650hx             # tables + plots in th
 Results are kept in one folder per machine, each with a `machine.txt` (CPU, cores/threads,
 RAM, OS, compiler, Faiss version, and the git commit behind each experiment):
 
-| Folder | Machine | Experiments | Discussed below |
+| Folder | Machine (from its `machine.txt`) | Experiments | Discussed in |
 |---|---|---|---|
-| `results/i7-13650hx/` | i7-13650HX laptop (6 P + 8 E cores, 20 threads), WSL2 Ubuntu 22.04, g++ 11.4, faiss-cpu 1.16.0 | E1–E11 | all results sections |
-| `results/i9-14900hx/` | i9-14900HX laptop (8 P + 16 E cores, 32 threads); OS, RAM, compiler not recorded | E1–E7 | [one section](#i9-14900hx-e1e7), not described in detail |
-| `results_2core_vm/` | 2-vCPU cloud VM, AVX-512, older code | E1–E6 | [one section](#second-machine-avx-512-2-vcpu-cloud-vm) |
+| `results/i7-13650hx/` | i7-13650HX laptop, 20 logical CPUs, WSL2 Ubuntu 22.04, g++ 11.4, faiss-cpu 1.16.0 | E1–E11 | all sections marked (i7-13650HX) |
+| `results/i9-14900hx/` | i9-14900HX laptop, 32 logical CPUs, native Arch Linux, g++ 16.2 | E1–E7, E9–E11 | [E10](#e10-top-k-selection-heap-vs-buffer-i7-13650hx-and-i9-14900hx), [i9-14900HX](#i9-14900hx) |
+| `results/cloud-vm-avx512/` | 2-vCPU cloud VM (Xeon @ 2.10 GHz, AVX-512), Ubuntu 24.04, g++ 13.3, faiss-cpu 1.16.0 | E1 | [Cloud VM](#cloud-vm-avx-512) |
 
-On the i7, both programs are pinned with `OMP_PROC_BIND=close OMP_PLACES=threads`. Kernel:
-AVX2 6 × 16, with 1 × 16 and 2 × 16 for nq = 1 and 2. The AVX-512 kernel cannot run on
-either laptop. On the i7, E1–E4 and E9–E11 use the tile buffers kept between searches;
-E5–E8 were run before that change (see [Memory](#memory-i7-13650hx)).
+`run_experiments.sh` pins both programs with `OMP_PROC_BIND=close OMP_PLACES=threads` on every
+machine. The laptops use the AVX2 6 × 16 kernel (`mr=6` in the CSVs; `mr=1` for nq = 1), the
+cloud VM the AVX-512 4 × 32 kernel (`mr=4`). The i7's E1–E7 and E9–E11 CSVs come from one run
+(commit b8a0944 plus uncommitted changes, tile buffers kept between searches); E8 used older
+code (e2dc468), from before that change.
 
 ## Input/output contract
 
@@ -64,7 +65,7 @@ E5–E8 were run before that change (see [Memory](#memory-i7-13650hx)).
 ### D1 — reference + checker (`src/reference.cpp`)
 `reference_search` computes every distance in **double precision** directly as
 Σ(x−y)² (no norm expansion → no cancellation error), then `partial_sort`s with
-the tie policy. It is slow on purpose (22–25 ms/query at nb=200k, d=128 on the i7-13650HX, E6) — it's
+the tie policy. It is slow on purpose (20–22 ms/query at nb=200k, d=128 on the i7-13650HX, E6) — it's
 ground truth.
 
 `check_results` decides if any result is exact. Floating-point means the fast
@@ -142,11 +143,11 @@ far point swapped in, a wrong distance, and an unsorted row.
 
 ## Results
 
-Every section below names its machine. The i7 tables are in `results/i7-13650hx/summary.md`.
-
-Times are medians of 5 repetitions (E7: 5 rounds; E8: see its file). Unless stated:
-uniform data, nb = 200k, d = 128, k = 10. All 158 runs in E1–E4 (both libraries)
-pass the checker (up to 32 sampled queries per run).
+Every section names its machine, and every number in it comes from that machine's CSVs
+(`summary.md` in each folder has the full tables). Times are the median of the repetitions in
+one run: 5 (E5 grid and E6: 3; E7: see there). Unless stated: uniform data, nb = 200k,
+d = 128, k = 10. On the i7 all 158 runs in E1–E4 (both libraries) pass the checker (up to
+32 sampled queries per run).
 
 ### E1: batch size × threads (i7-13650HX)
 
@@ -158,109 +159,129 @@ Faiss time / our time at the same thread count (above 1 = we are faster):
 
 | nq | T=1 | 2 | 4 | 6 | 8 | 12 | 14 | 20 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 1.17 | 2.40 | 2.58 | 2.19 | 2.31 | 1.93 | 2.05 | 1.87 |
-| 4 | 4.29 | 3.71 | 2.00 | 2.24 | 2.31 | 1.87 | 2.08 | 1.51 |
-| 16 | 7.18 | 7.86 | 5.90 | 6.19 | 3.33 | 3.65 | 2.72 | 5.04 |
-| 64 | 10.34 | 12.15 | 10.75 | 10.07 | 5.63 | 5.58 | 6.00 | 4.06 |
-| 256 | 11.19 | 13.44 | 13.25 | 11.18 | 7.42 | 6.87 | 6.39 | 6.91 |
-| 1024 | 2.53 | 2.67 | 2.84 | 2.89 | 3.58 | 3.43 | 3.27 | 3.92 |
-| 4096 | 2.64 | 2.87 | 2.76 | 3.05 | 3.95 | 3.44 | 3.33 | 3.54 |
+| 1 | 1.02 | 2.50 | 2.42 | 2.27 | 2.22 | 2.15 | 2.13 | 1.97 |
+| 4 | 4.60 | 2.81 | 2.35 | 2.05 | 2.20 | 1.91 | 2.06 | 2.23 |
+| 16 | 6.57 | 7.26 | 5.75 | 6.22 | 3.53 | 3.19 | 3.25 | 2.02 |
+| 64 | 10.97 | 12.25 | 11.10 | 11.73 | 5.28 | 5.58 | 5.28 | 6.93 |
+| 256 | 10.49 | 12.89 | 12.23 | 11.67 | 8.26 | 6.53 | 6.38 | 7.14 |
+| 1024 | 2.56 | 2.66 | 2.73 | 2.89 | 3.81 | 3.41 | 3.21 | 6.63 |
+| 4096 | 2.72 | 2.79 | 2.85 | 3.06 | 4.08 | 3.49 | 3.37 | 4.49 |
 
-* **nq = 4 to 256**, where Faiss 1.16 uses its per-pair sequential path: 1.5–13.4× faster.
-* **nq ≥ 1024** (Faiss BLAS path): 2.5–4.0× faster.
-* **nq = 1, 1 thread:** 4.94 vs 5.78 ms here, but treat it as a tie: in a separate 9-round
-  comparison the two were within 6% with overlapping ranges.
+* **nq = 4 to 256**, where Faiss 1.16 uses its per-pair sequential path: 1.9–12.9× faster.
+* **nq ≥ 1024** (Faiss BLAS path): 2.6–6.6× faster.
+* **nq = 1:** at 1 thread 5.35 ± 0.17 vs 5.45 ± 0.34 ms
+  (median ± standard deviation), a tie. From 2 threads on we are 1.97–2.50× faster: our scan is
+  split over the threads, Faiss's single query is not.
 * **Self-speedup** (over each library's own 1-thread time), ours / Faiss:
 
 | nq | T=2 | 4 | 6 | 8 | 12 | 14 | 20 |
 |---|---|---|---|---|---|---|---|
-| 1 | 1.60 / 0.78 | 1.92 / 0.87 | 1.55 / 0.83 | 1.70 / 0.86 | 1.75 / 1.06 | 1.70 / 0.97 | 1.41 / 0.88 |
-| 64 | 1.86 / 1.58 | 3.35 / 3.22 | 4.21 / 4.32 | 2.91 / 5.34 | 3.85 / 7.14 | 3.95 / 6.79 | 2.65 / 6.75 |
-| 4096 | 2.00 / 1.84 | 3.40 / 3.25 | 4.72 / 4.08 | 4.97 / 3.31 | 5.20 / 3.98 | 5.49 / 4.36 | 6.45 / 4.80 |
+| 1 | 1.44 / 0.59 | 2.01 / 0.85 | 2.10 / 0.95 | 1.86 / 0.86 | 1.86 / 0.89 | 1.85 / 0.89 | 1.61 / 0.84 |
+| 64 | 1.82 / 1.63 | 3.36 / 3.32 | 4.54 / 4.25 | 2.76 / 5.74 | 3.66 / 7.20 | 4.12 / 8.56 | 4.58 / 7.26 |
+| 4096 | 2.05 / 2.01 | 3.61 / 3.46 | 4.64 / 4.14 | 5.05 / 3.37 | 5.37 / 4.20 | 5.67 / 4.59 | 6.11 / 3.71 |
 
-  At nq = 64 Faiss scales better from 6 threads on, from a 1-thread time that is 10.3× longer
-  (301 vs 29.1 ms). The 20-thread column is the noisiest. WSL hides P- and E-cores, so T = 12 is not "P-cores only".
+  At nq = 64 Faiss's self-speedup is higher than ours from 8 threads on, from a
+  1-thread time that is 11.0× longer (304 vs 27.67 ms). The 20-thread column is
+  the noisiest (median standard deviation 17% of the median, against
+  2–6% for the other thread counts). WSL hides P- and E-cores, so T = 12 is not
+  "P-cores only".
 
 ### E2–E4: dimension, k, input family (i7-13650HX, 14 threads)
 
-Ours / Faiss in ms (Faiss time / our time). 14 threads, because earlier runs with all 20
-were too noisy. Only d = 32, nq = 1 (under 0.3 ms for both) still has a standard deviation above 15% of
-its median: read it as "faster", not as a precise ratio.
+Ours / Faiss in ms (Faiss time / our time). 14 threads rather than all 20, because the
+20-thread runs are the noisiest in E1. Rows whose standard deviation is above 15% of the
+median: d = 32, nq = 1 (ours 125%, Faiss 52%), d = 128, nq = 1 (Faiss 42%), d = 512, nq = 64 (Faiss 21%), k = 1, nq = 16 (Faiss 16%); read those as "faster", not as a precise ratio.
 
 E2, nb = 100k, k = 10:
 
 | d | nq = 1 | nq = 64 | nq = 1024 |
 |---|---|---|---|
-| d = 32 | 0.09 / 0.27 (3.1×) | 1.05 / 3.59 (3.4×) | 12.55 / 58.25 (4.6×) |
-| d = 128 | 1.10 / 2.96 (2.7×) | 3.45 / 18.25 (5.3×) | 45.93 / 139 (3.0×) |
-| d = 512 | 6.01 / 14.39 (2.4×) | 13.02 / 89.78 (6.9×) | 168 / 430 (2.6×) |
+| d = 32 | 0.09 / 0.28 (3.3×) | 1.09 / 3.62 (3.3×) | 12.86 / 60.35 (4.7×) |
+| d = 128 | 1.17 / 2.33 (2.0×) | 3.92 / 18.63 (4.7×) | 45.49 / 162 (3.6×) |
+| d = 512 | 5.98 / 15.77 (2.6×) | 14.32 / 110 (7.7×) | 200 / 443 (2.2×) |
 
 E3:
 
 | k | nq = 16 | nq = 1024 |
 |---|---|---|
-| k = 1 | 3.81 / 13.26 (3.5×) | 81.18 / 226 (2.8×) |
-| k = 10 | 4.03 / 12.82 (3.2×) | 82.22 / 272 (3.3×) |
-| k = 100 | 4.26 / 15.72 (3.7×) | 96.73 / 274 (2.8×) |
-| k = 1000 | 8.77 / 12.64 (1.4×) | 159 / 311 (2.0×) |
+| k = 1 | 4.01 / 13.45 (3.4×) | 84.98 / 233 (2.7×) |
+| k = 10 | 4.41 / 12.83 (2.9×) | 84.05 / 287 (3.4×) |
+| k = 100 | 4.63 / 13.50 (2.9×) | 98.63 / 284 (2.9×) |
+| k = 1000 | 8.53 / 17.23 (2.0×) | 165 / 316 (1.9×) |
 
 E4, k = 10:
 
 | family | nq = 1 | nq = 64 | nq = 1024 |
 |---|---|---|---|
-| clustered | 2.95 / 6.31 (2.1×) | 6.98 / 42.58 (6.1×) | 82.83 / 270 (3.3×) |
-| ties | 3.06 / 7.01 (2.3×) | 7.34 / 40.81 (5.6×) | 84.04 / 268 (3.2×) |
+| clustered | 2.85 / 6.01 (2.1×) | 6.83 / 37.81 (5.5×) | 85.59 / 277 (3.2×) |
+| ties | 2.92 / 5.73 (2.0×) | 7.33 / 36.33 (5.0×) | 84.17 / 269 (3.2×) |
 
-* **Unfavourable case, large k:** the lead falls from 3.3× (k = 10) to 2.0× (k = 1000) at
-  nq = 1024, and from 3.2× to 1.4× at nq = 16, as heap updates cost more.
+* **Unfavourable case, large k:** the lead falls from 3.4× (k = 10) to 1.9× (k = 1000) at
+  nq = 1024, and from 2.9× to 2.0× at nq = 16, as selection costs more.
 
 ### E5: selector against a grid (i7-13650HX, 20 threads)
 
 ![E5](results/i7-13650hx/fig_e5_selector.png)
 
-* Grid: S ∈ {1, 2, 4, 8, 16, 20} × tq ∈ {4, 16, 64} (rounded up to 6, 18, 66) × tb ∈
-  {256, 2048, 16384} = 54 configs per nq.
-* The selector is within 0.99–1.30× of the best grid config; the worst config is
-  2.4–6.9× slower than the best.
-* It splits the database (S > 1) for every nq from 1 to 1024, and the best grid config does too.
-  For nq ≤ 16 it picks S = 20 while S = 8 was fastest; a smaller S for tiny batches
-  is the main remaining gap.
+Grid: S ∈ {1, 2, 4, 8, 16, 20} × tq ∈ {6, 18, 66} × tb ∈ {256, 2048, 16384} = 54 configs per nq.
+
+| nq | selector ms | selector S | best grid ms | best grid S, tq, tb | selector / best | worst / best |
+|---|---|---|---|---|---|---|
+| 1 | 5.35 | 20 | 2.46 | 8, 66, 256 | 2.18 | 2.57 |
+| 4 | 2.99 | 20 | 2.47 | 8, 6, 16384 | 1.21 | 4.52 |
+| 16 | 3.77 | 20 | 3.21 | 20, 18, 256 | 1.18 | 4.97 |
+| 64 | 6.33 | 20 | 5.28 | 20, 66, 256 | 1.20 | 8.37 |
+| 256 | 20.39 | 5 | 18.16 | 8, 66, 256 | 1.12 | 7.91 |
+| 1024 | 74.41 | 2 | 70.93 | 2, 66, 256 | 1.05 | 5.95 |
+
+* The selector is within 1.05–2.18× of the best grid config; the worst config is
+  2.6–8.4× slower than the best.
+* The selector's nq = 1 row is a noisy single run: standard deviation 19% of its median,
+  fastest repetition 3.15 ms (1.28× the best grid median).
 
 ### E6: sequential double-precision reference (i7-13650HX)
 
-24.9 ms for 1 query, 21.9 ms per query for 16.
+21.6 ms for 1 query, 20.3 ms per query for 16.
 
 ### E7: is nq = 1 limited by memory bandwidth? (i7-13650HX)
 
 ![E7](results/i7-13650hx/fig_e7_bandwidth.png)
 
-Yes. From 1 to 14 threads our nq = 1 scan (packed database bytes / time) runs at 90–103% of
-a plain memory read of a same-sized array:
+Yes. At every thread count our nq = 1 scan (packed database bytes / time) runs at
+89–105% of a plain memory read of a same-sized array (medians of 5 rounds; scan range
+in brackets):
 
-| T | read 99 MiB (GB/s) | our scan (GB/s) | ratio |
+| T | read 99 MiB (GB/s) | our scan (GB/s, range) | ratio |
 |---|---|---|---|
-| 1 | 21.6 | 22.2 | 103% |
-| 2 | 25.0 | 25.8 | 103% |
-| 4 | 33.4 | 33.8 | 101% |
-| 6 | 40.5 | 39.4 | 97% |
-| 8 | 39.1 | 35.0 | 90% |
-| 12 | 36.0 | 33.6 | 93% |
-| 14 | 35.2 | 33.4 | 95% |
-| 20 | 19.0 | 13.2 | 70% (unstable: scan 10–35 GB/s between rounds) |
+| 1 | 23.4 | 23.7 (21.3–24.1) | 101% |
+| 2 | 31.5 | 32.7 (29.4–34.8) | 104% |
+| 4 | 40.5 | 41.2 (37.1–41.4) | 102% |
+| 6 | 41.6 | 41.5 (39.1–43.0) | 100% |
+| 8 | 37.9 | 36.1 (34.7–41.3) | 95% |
+| 12 | 40.7 | 36.0 (35.9–39.3) | 89% |
+| 14 | 35.7 | 37.5 (35.3–38.9) | 105% |
+| 20 | 34.3 | 34.8 (16.6–35.1) | 101% |
 
-One thread scans a database that fits in L2 at 64.5 GB/s, 2.9× its speed from RAM, so the
-kernel is not the limit. One thread already uses 21.6 of the at most 40.5 GB/s, which allows
-at most about 1.9× from more threads; E1's best nq = 1 self-speedup is 1.92×.
+One thread scans a database that fits in L2 (2000 rows) at 73.0 GB/s
+(68.0–75.5 over 5 rounds; one search takes 13.7–15.2 µs), 3.1× its
+23.7 GB/s from RAM, so the kernel is not the limit. One thread already reads at
+23.4 of the at most 41.6 GB/s, which allows at most about 1.8× from more threads;
+the scan here goes from 4.35 ms at 1 thread to at best 2.49 ms (6 threads), 1.75×. E1's
+larger 2.10× (6 threads) is a single run whose 1-thread time (5.35 ms) was slower than E7's.
 
-### E8: over-decomposition, tried and not kept (i7-13650HX)
+The in-cache rows were rerun after a fix: `knn_bench` used to print times rounded to whole
+microseconds, a ±7% step for a 13 µs search. Times are now printed to the nanosecond. Only
+the i7's in-cache rows were rerun; the other E7 rows are unchanged. The i9's in-cache rows
+still have the old rounding and are not reported.
+
+### E8: over-decomposition, tried and not kept (i7-13650HX, older code)
 
 Giving each thread about 4 database chunks made nq = 64 at 8 threads 19–24% faster, but was
 up to 46% slower at k = 1000, and a restricted version was up to 23% slower at 6 threads,
-so the selector was left unchanged. Details: [results/i7-13650hx/e8_oversplit.md](results/i7-13650hx/e8_oversplit.md).
+so the selector was left unchanged. These numbers are from code e2dc468 and are not in a
+CSV; details: [results/i7-13650hx/e8_oversplit.md](results/i7-13650hx/e8_oversplit.md).
 
-### E9–E11 (i7-13650HX, current code, 14 threads)
-
-These three were run on the i7 with the current code, after the other experiments.
+### E9–E11 (i7-13650HX, 14 threads)
 
 #### E9: SIFT1M (real data)
 
@@ -269,31 +290,36 @@ the checker.
 
 | nq | ours ms | Faiss ms | Faiss / ours | Faiss path |
 |---|---|---|---|---|
-| 1 | 15.60 | 33.44 | 2.1× | seq |
-| 64 | 34.79 | 270 | 7.8× | seq |
-| 1024 | 410 | 1336 | 3.3× | blas |
+| 1 | 15.11 | 32.70 | 2.2× | seq |
+| 64 | 34.03 | 257 | 7.5× | seq |
+| 1024 | 433 | 1379 | 3.2× | blas |
 
-#### E10: top-k selection, heap vs buffer
+#### E10: top-k selection, heap vs buffer (i7-13650HX and i9-14900HX)
 
-Uniform, nb = 200k, d = 128. All runs pass the checker.
+Uniform, nb = 200k, d = 128, 14 threads, one run on each machine. All runs pass the checker.
+Times are not comparable across machines; the ratios are.
 
-| k | nq | heap ms | buffer ms | buffer / heap | selector picks |
-|---|---|---|---|---|---|
-| 1 | 16 | 4.15 | 4.08 | 0.98 | heap |
-| 1 | 1024 | 84.09 | 81.14 | 0.96 | heap |
-| 10 | 16 | 3.98 | 3.99 | 1.00 | heap |
-| 10 | 1024 | 81.73 | 81.94 | 1.00 | heap |
-| 100 | 16 | 5.00 | 4.62 | 0.92 | heap |
-| 100 | 1024 | 107 | 98.33 | 0.92 | heap |
-| 1000 | 16 | 9.39 | 8.09 | 0.86 | buffer |
-| 1000 | 1024 | 172 | 167 | 0.97 | buffer |
+| k | nq | i7 heap ms | i7 buffer ms | i7 buffer / heap | i9 heap ms | i9 buffer ms | i9 buffer / heap | selector picks |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 16 | 4.06 | 3.92 | 0.97 | 2.75 | 2.73 | 0.99 | heap |
+| 1 | 1024 | 85.34 | 83.77 | 0.98 | 97.02 | 97.75 | 1.01 | heap |
+| 10 | 16 | 4.11 | 3.94 | 0.96 | 2.66 | 2.53 | 0.95 | heap |
+| 10 | 1024 | 87.32 | 86.11 | 0.99 | 99.79 | 101 | 1.01 | heap |
+| 100 | 16 | 4.28 | 4.25 | 0.99 | 3.05 | 2.62 | 0.86 | heap |
+| 100 | 1024 | 97.05 | 95.62 | 0.99 | 117 | 111 | 0.95 | heap |
+| 1000 | 16 | 8.63 | 9.71 | 1.12 | 8.57 | 5.59 | 0.65 | buffer |
+| 1000 | 1024 | 168 | 163 | 0.97 | 174 | 141 | 0.81 | buffer |
 
-* At k = 1 and 10 the buffer is within 0.96–1.00× of the heap, so
+* At k = 1 and 10 the buffer is within 0.95–1.01× of the heap on both machines, so
   keeping it costs nothing at small k (the selector uses the heap there anyway).
-* At k = 1000 it is 3–14% faster. At k = 100 it was 8% faster but the
-  selector, whose threshold (k ≥ 128) came from a separate sweep that did not include
-  k = 100, picks the heap: the crossover lies between k = 64 and 128 and was not
-  pinned down further.
+* **The crossover differs per machine.** On the i9 the buffer is already 14% (nq = 16)
+  and 5% (nq = 1024) faster at k = 100, and 35% and 19% faster at k = 1000. On the i7 it
+  is no faster at k = 100 (0.99× and 0.99×), and at k = 1000 it is 3% faster at nq = 1024
+  but 12% slower at nq = 16 in this run.
+* The selector's threshold (buffer for k ≥ 128) came from a sweep on the i7. On the i9 it
+  leaves k = 100 on the slower heap; the crossover there lies at or below k = 100 and was not
+  pinned down. A per-machine threshold (for example measured at startup, or tied to the
+  cache sizes) was not tried.
 
 #### E11: strict mode on vs off
 
@@ -301,22 +327,22 @@ nb = 200k, d = 128, k = 10. All runs pass the checker.
 
 | family | nq | off ms | on ms | on / off | rescans | ids equal to reference, off → on |
 |---|---|---|---|---|---|---|
-| uniform | 1 | 2.85 | 3.09 | 1.08 | 0 | 1/1 → 1/1 |
-| uniform | 64 | 7.21 | 7.88 | 1.09 | 0 | 32/32 → 32/32 |
-| uniform | 1024 | 86.86 | 86.32 | 0.99 | 0 | 32/32 → 32/32 |
-| clustered | 1 | 3.53 | 3.23 | 0.92 | 0 | 1/1 → 1/1 |
-| clustered | 64 | 6.98 | 6.99 | 1.00 | 0 | 31/32 → 32/32 |
-| clustered | 1024 | 79.58 | 85.48 | 1.07 | 0 | 31/32 → 32/32 |
-| ties | 1 | 3.47 | 3.35 | 0.97 | 0 | 1/1 → 1/1 |
-| ties | 64 | 6.99 | 8.51 | 1.22 | 0 | 32/32 → 32/32 |
-| ties | 1024 | 80.68 | 85.32 | 1.06 | 0 | 32/32 → 32/32 |
+| uniform | 1 | 2.89 | 2.82 | 0.98 | 0 | 1/1 → 1/1 |
+| uniform | 64 | 7.01 | 7.27 | 1.04 | 0 | 32/32 → 32/32 |
+| uniform | 1024 | 80.38 | 86.70 | 1.08 | 0 | 32/32 → 32/32 |
+| clustered | 1 | 2.85 | 2.81 | 0.99 | 0 | 1/1 → 1/1 |
+| clustered | 64 | 6.97 | 7.67 | 1.10 | 0 | 31/32 → 32/32 |
+| clustered | 1024 | 83.30 | 86.57 | 1.04 | 0 | 31/32 → 32/32 |
+| ties | 1 | 3.03 | 2.89 | 0.95 | 0 | 1/1 → 1/1 |
+| ties | 64 | 6.91 | 7.45 | 1.08 | 0 | 32/32 → 32/32 |
+| ties | 1024 | 79.32 | 82.49 | 1.04 | 0 | 32/32 → 32/32 |
 
-* No query needed a rescan on these datasets; the overhead is 0.92–1.22× in single runs
+* No query needed a rescan on these datasets; the overhead is 0.95–1.10× in single runs
   at 14 threads, which is within run-to-run noise for most rows.
-* Strict mode turned clustered's 31 of 32 identical rows into 32 of 32.
+* Strict mode made more rows identical to the reference: clustered at nq = 64, 31/32 → 32/32; clustered at nq = 1024, 31/32 → 32/32.
 * Rescans do happen on adversarial data: in the tests, values offset by 1000 make the float
   norm expansion lose most digits; non-strict then matched the reference in 1 of 389 rows,
-  strict in all of them, by rescanning every query.
+  strict in all of them, by rescanning every query (test output, not a CSV).
 
 ### Memory (i7-13650HX)
 
@@ -324,20 +350,21 @@ Extra memory of the search over the 79 E1–E4 cases:
 
 | | Ours, calculated | Ours, measured | Faiss, measured |
 |---|---|---|---|
-| Faiss BLAS path (24 cases) | 33 KiB – 4.0 MiB | 0.0 – 3.8 MiB | 5.6 – 41.2 MiB |
-| Faiss sequential path (55 cases) | 3 KiB – 1.9 MiB | 0.0 – 2.3 MiB | 0.0 – 6.7 MiB |
+| Faiss BLAS path (24 cases) | 33 KiB – 4.0 MiB | 0.0 – 3.8 MiB | 5.3 – 41.5 MiB |
+| Faiss sequential path (55 cases) | 3 KiB – 4.1 MiB | 0.0 – 5.8 MiB | 0.0 – 6.7 MiB |
 
 * *Calculated* (`tiled_working_bytes`) is the tile copies plus partial heaps. *Measured* is the
-  growth of peak RSS over 6 searches, the same way for both. It includes thread stacks and
+  growth of peak RSS during the searches, the same way for both. It includes thread stacks and
   allocator overhead, but reads low (even 0, or below the calculated size) when
   earlier setup already set a higher peak.
-* **BLAS path:** we measured less than Faiss in all 24 cases. E1 at nq = 4096:
-  0.2–1.1 MiB against 19.4–20.3 MiB.
-* **Sequential path:** mixed. We measured less in 31 cases, the same in 11 and more in 13,
+* **BLAS path:** we measured less than Faiss in 24 of 24 cases. E1 at nq = 4096:
+  0.0–1.3 MiB against 19.5–20.2 MiB.
+* **Sequential path:** mixed. We measured less in 36 cases, the same in 6 and more in 13,
   so "memory efficient" is not a claim for that path.
 * **Tile buffers are kept.** Each thread keeps its query-tile buffer between searches and only
   grows it, instead of allocating and freeing it in every search. Peak growth at d = 512,
-  nb = 100k, nq = 4096, 20 threads (peak counter reset before the first search, 3 runs; calculated size 3.5 MiB):
+  nb = 100k, nq = 4096, 20 threads (peak counter reset before the first search, 3 runs; calculated
+  size 3.5 MiB; measured by hand when the change was made, not in a CSV):
 
 | Searches | Before | After |
 |---|---|---|
@@ -345,43 +372,120 @@ Extra memory of the search over the 79 E1–E4 cases:
 | 11 | 26.2–26.4 MiB | 4.5–4.6 MiB |
 | 101 | 26.2–26.4 MiB | 4.5–4.6 MiB |
 
-### i9-14900HX (E1–E7)
+### i9-14900HX
 
-A teammate's run of E1–E7 on an i9-14900HX laptop (32 threads), with the code of commit
-e471e72: the same code as the i7's E1–E4, but newer than the code behind the i7's E5–E7.
-That version of the script only went up to 20 threads in E1, and RAM, OS, compiler and
-Faiss version were not recorded (see its `machine.txt`). Its tables are in
-[results/i9-14900hx/summary.md](results/i9-14900hx/summary.md); they are not discussed in
-this README. Do not mix its numbers with the i7's.
+A teammate's run of E1–E7 and E9–E11 on an i9-14900HX laptop (32 logical CPUs, native Linux,
+so not under WSL), with commit 1b77911 plus uncommitted changes that were not recorded. Its
+`machine.txt` says faiss-cpu was not installed when the file was written, but its E1–E4 and
+E9 CSVs contain Faiss rows, so the Faiss version used is not known. All 186 runs in E1–E4
+pass the checker. Do not mix its times with the i7's; full tables in
+[results/i9-14900hx/summary.md](results/i9-14900hx/summary.md).
 
-### Second machine (AVX-512): 2-vCPU cloud VM
+E1, Faiss time / our time:
 
-A shared 2-vCPU cloud VM (Xeon 2.1 GHz, AVX-512 4 × 32 kernel, Ubuntu 24.04, g++ 13.3, not
-pinned, noisy), earlier code. Do not compare its times with the laptops'. E1 there: 0.96×
-(nq = 1, 1 thread) to 8.8× against Faiss; 2.5–3.1× for nq ≥ 1024; calculated working memory at most 80 KiB
-in E1. Full tables: [results_2core_vm/summary.md](results_2core_vm/summary.md).
+| nq | T=1 | 2 | 4 | 6 | 8 | 12 | 14 | 20 | 24 | 32 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1.06 | 3.12 | 2.86 | 2.97 | 2.21 | 2.50 | 2.51 | 1.81 | 1.39 | 2.53 |
+| 4 | 3.00 | 2.57 | 2.47 | 2.81 | 2.75 | 2.56 | 2.01 | 1.37 | 1.36 | 1.65 |
+| 16 | 5.82 | 3.82 | 4.30 | 4.24 | 2.92 | 3.83 | 4.38 | 1.13 | 1.12 | 1.81 |
+| 64 | 7.77 | 4.70 | 5.36 | 4.97 | 4.43 | 5.57 | 5.78 | 3.76 | 3.22 | 6.68 |
+| 256 | 8.09 | 5.02 | 5.89 | 5.60 | 5.31 | 6.76 | 6.09 | 6.04 | 5.94 | 4.37 |
+| 1024 | 2.60 | 2.85 | 2.98 | 2.98 | 3.19 | 3.10 | 3.08 | 3.26 | 2.88 | 4.19 |
+| 4096 | 2.58 | 2.92 | 3.00 | 3.05 | 3.11 | 3.14 | 3.12 | 3.46 | 3.77 | 4.14 |
+
+* nq = 4 to 256 (Faiss sequential path): 1.1–8.1×; nq ≥ 1024 (BLAS path): 2.6–4.2×;
+  nq = 1: 1.06× at 1 thread, 1.39–3.12× from 2 threads on.
+* Self-speedup, ours / Faiss:
+
+| nq | T=2 | 4 | 6 | 8 | 12 | 14 | 20 | 24 | 32 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1.18 / 0.40 | 1.95 / 0.73 | 2.18 / 0.78 | 1.98 / 0.95 | 2.83 / 1.21 | 3.01 / 1.27 | 2.30 / 1.35 | 2.06 / 1.57 | 1.76 / 0.74 |
+| 64 | 0.98 / 1.63 | 1.76 / 2.55 | 2.53 / 3.95 | 2.93 / 5.14 | 3.96 / 5.53 | 4.59 / 6.17 | 3.69 / 7.63 | 3.85 / 9.29 | 6.26 / 7.29 |
+| 4096 | 1.09 / 0.96 | 1.98 / 1.71 | 2.85 / 2.42 | 3.49 / 2.90 | 4.79 / 3.94 | 5.23 / 4.33 | 7.03 / 5.24 | 7.99 / 5.47 | 7.57 / 4.72 |
+
+* E2–E4 (14 threads): 1.3–12.9× faster than Faiss over all 23 cases.
+* E5 (32 threads): the selector is within 1.06–1.63× of the best of 72 grid configs.
+* E6: 11.9 ms for 1 query, 10.8 ms per query for 16.
+* E7: the nq = 1 scan runs at 80–100% of a 99 MiB memory read:
+
+| T | read 99 MiB (GB/s) | our scan (GB/s, range) | ratio |
+|---|---|---|---|
+| 1 | 28.4 | 27.9 (27.8–28.2) | 98% |
+| 2 | 35.7 | 35.7 (35.2–35.8) | 100% |
+| 4 | 61.3 | 60.5 (58.7–61.3) | 99% |
+| 6 | 72.5 | 71.2 (67.2–71.5) | 98% |
+| 8 | 77.7 | 77.4 (76.8–78.7) | 100% |
+| 12 | 96.8 | 94.2 (93.6–94.9) | 97% |
+| 14 | 101.7 | 100.6 (96.4–102.1) | 99% |
+| 20 | 105.7 | 88.8 (79.1–96.0) | 84% |
+| 24 | 99.6 | 79.8 (76.4–91.6) | 80% |
+| 32 | 86.5 | 74.1 (55.8–81.8) | 86% |
+
+* E9, SIFT1M:
+
+| nq | ours ms | Faiss ms | Faiss / ours | Faiss path |
+|---|---|---|---|---|
+| 1 | 6.69 | 15.82 | 2.4× | seq |
+| 64 | 30.54 | 173 | 5.6× | seq |
+| 1024 | 460 | 1459 | 3.2× | blas |
+
+* E11: no rescans; strict mode costs 0.90–1.07× in single runs.
+
+### Cloud VM (AVX-512)
+
+A shared 2-vCPU cloud VM (Xeon @ 2.10 GHz) with the AVX-512 4 × 32 kernel, commit 366799c
+plus uncommitted changes, pinned like the laptops; E1 only, at 1 and 2 threads. All 28 runs pass
+the checker. Do not compare its times with the laptops'.
+
+Faiss time / our time:
+
+| nq | T=1 | 2 |
+|---|---|---|
+| 1 | 1.32 | 2.92 |
+| 4 | 3.22 | 3.64 |
+| 16 | 6.62 | 4.17 |
+| 64 | 9.18 | 6.65 |
+| 256 | 8.04 | 5.62 |
+| 1024 | 2.99 | 3.30 |
+| 4096 | 3.35 | 3.72 |
+
+* nq = 4 to 256 (Faiss sequential path): 3.2–9.2×; nq ≥ 1024 (BLAS path): 3.0–3.7×.
+* Self-speedup at 2 threads, ours / Faiss:
+
+| nq | T=2 |
+|---|---|
+| 1 | 1.78 / 0.80 |
+| 4 | 2.69 / 2.38 |
+| 16 | 2.53 / 4.01 |
+| 64 | 2.16 / 2.98 |
+| 256 | 1.69 / 2.42 |
+| 1024 | 1.96 / 1.77 |
+| 4096 | 1.78 / 1.60 |
+
+* Calculated working memory at most 79.5 KiB in E1. Full tables:
+  [results/cloud-vm-avx512/summary.md](results/cloud-vm-avx512/summary.md).
 
 **Fairness notes.** Same machine, same data files, same thread count via
 `omp_set_num_threads`, same pinning, only `search` timed (Faiss `add` and
 our packing are reported as preprocessing), outputs preallocated for both.
-Faiss here is the pip wheel with OpenBLAS 0.3.15; an MKL build of Faiss would
+Faiss is the faiss-cpu 1.16.0 pip wheel (OpenBLAS) on the i7 and the VM, and of unknown
+version on the i9; an MKL build of Faiss would
 likely be faster on the BLAS path, so we **don't claim general superiority** —
 our claim is for the constrained regime the brief suggests: **small/medium
-batches** (and, on Faiss's BLAS path, less extra memory in every case we measured). Faiss's current `main` adds a
+batches** (and, on Faiss's BLAS path, less extra memory in the cases we measured). Faiss's current `main` adds a
 database-parallel path for nq < threads that 1.16 doesn't use here; that would
 narrow the nq=1 gap.
 
 ## Limitations and future work
 
-* **Faiss build:** only the pip wheel (OpenBLAS 0.3.15) was compared. An MKL build would
+* **Faiss build:** only the pip wheel (OpenBLAS) was compared. An MKL build would
   likely be faster on the BLAS path (nq ≥ 1024), and Faiss's current `main`, with its
   database-parallel path for small batches, was not tested.
-* **AVX-512:** the current code's AVX-512 kernel has not been run on AVX-512 hardware.
-  It was only measured on a 2-vCPU cloud VM with older code; neither laptop has AVX-512.
 * **Per-machine tuning:** the selector's constants (buffer from k ≥ 128, the 1- and 2-row
-  kernels, tile sizes) were measured on the i7 only. The k = 64–128 crossover was not
-  pinned down, and for tiny batches the selector splits the database more than the best
-  grid configuration (E5).
+  kernels, tile sizes) were measured on the i7 only. E10 shows that the heap/buffer
+  crossover differs per machine (the i9 already gains at k = 100) and it was not pinned
+  down on either. In E5 the selector splits the database more than the best grid
+  configuration at nq = 1 and 4 (more than 5% slower there).
 * **Unequal threads:** chunks are equal in size while threads run at unequal speed. The fix
   tried in E8 was rejected, and WSL hides which cores are P- or E-cores, so this was not
   separated.

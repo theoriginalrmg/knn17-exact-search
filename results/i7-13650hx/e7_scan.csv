@@ -7,7 +7,6 @@ tiled,scan,200000,1,128,10,8,tq=6 tb=1280 S=8 T=8 mr=1 sel=heap (db-parallel),0.
 tiled,scan,200000,1,128,10,12,tq=6 tb=1280 S=12 T=12 mr=1 sel=heap (db-parallel),0.020047,0.002868,0.002624,0.000168,348.7,0.00,37.7,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.021255,0.002745,0.002450,0.002140,364.3,0.16,44.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,20,tq=6 tb=1280 S=20 T=20 mr=1 sel=heap (db-parallel),0.025934,0.002968,0.002818,0.003180,336.9,0.16,62.8,PASS(1/1) strict 1/1
-tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000488,0.000013,0.000012,0.000009,77136.7,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.045292,0.004313,0.004117,0.000173,231.9,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,2,tq=6 tb=1280 S=2 T=2 mr=1 sel=heap (db-parallel),0.025024,0.002983,0.002792,0.000237,335.2,0.00,6.3,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,4,tq=6 tb=1280 S=4 T=4 mr=1 sel=heap (db-parallel),0.016391,0.002778,0.002610,0.000280,359.9,0.00,12.6,PASS(1/1) strict 1/1
@@ -16,7 +15,6 @@ tiled,scan,200000,1,128,10,8,tq=6 tb=1280 S=8 T=8 mr=1 sel=heap (db-parallel),0.
 tiled,scan,200000,1,128,10,12,tq=6 tb=1280 S=12 T=12 mr=1 sel=heap (db-parallel),0.019399,0.002626,0.002332,0.000196,380.8,0.00,37.7,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.025824,0.002650,0.002416,0.000180,377.4,0.16,44.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,20,tq=6 tb=1280 S=20 T=20 mr=1 sel=heap (db-parallel),0.022679,0.002970,0.002798,0.000599,336.6,0.16,62.8,PASS(1/1) strict 1/1
-tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000511,0.000013,0.000013,0.000005,75030.0,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.046742,0.004346,0.004160,0.000181,230.1,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,2,tq=6 tb=1280 S=2 T=2 mr=1 sel=heap (db-parallel),0.025080,0.002962,0.002801,0.000249,337.7,0.00,6.3,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,4,tq=6 tb=1280 S=4 T=4 mr=1 sel=heap (db-parallel),0.016001,0.002503,0.002389,0.000225,399.5,0.00,12.6,PASS(1/1) strict 1/1
@@ -25,7 +23,6 @@ tiled,scan,200000,1,128,10,8,tq=6 tb=1280 S=8 T=8 mr=1 sel=heap (db-parallel),0.
 tiled,scan,200000,1,128,10,12,tq=6 tb=1280 S=12 T=12 mr=1 sel=heap (db-parallel),0.015192,0.002864,0.002543,0.000196,349.2,0.00,37.7,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.016612,0.002927,0.002626,0.000109,341.6,0.16,44.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,20,tq=6 tb=1280 S=20 T=20 mr=1 sel=heap (db-parallel),0.029806,0.002969,0.002809,0.001133,336.8,0.16,62.8,PASS(1/1) strict 1/1
-tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000613,0.000015,0.000014,0.000001,68460.3,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.046817,0.004354,0.004146,0.000279,229.6,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,2,tq=6 tb=1280 S=2 T=2 mr=1 sel=heap (db-parallel),0.025517,0.003159,0.002995,0.000293,316.5,0.00,6.3,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,4,tq=6 tb=1280 S=4 T=4 mr=1 sel=heap (db-parallel),0.015801,0.002502,0.002340,0.000152,399.7,0.00,12.6,PASS(1/1) strict 1/1
@@ -34,7 +31,6 @@ tiled,scan,200000,1,128,10,8,tq=6 tb=1280 S=8 T=8 mr=1 sel=heap (db-parallel),0.
 tiled,scan,200000,1,128,10,12,tq=6 tb=1280 S=12 T=12 mr=1 sel=heap (db-parallel),0.023032,0.002737,0.002544,0.000115,365.4,0.00,37.7,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.013818,0.002758,0.002442,0.000232,362.6,0.16,44.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,20,tq=6 tb=1280 S=20 T=20 mr=1 sel=heap (db-parallel),0.019465,0.002941,0.002809,0.000511,340.1,0.00,62.8,PASS(1/1) strict 1/1
-tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000522,0.000017,0.000013,0.000004,57201.7,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.048040,0.004281,0.004118,0.000182,233.6,0.00,3.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,2,tq=6 tb=1280 S=2 T=2 mr=1 sel=heap (db-parallel),0.028595,0.003515,0.003075,0.000334,284.5,0.00,6.3,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,4,tq=6 tb=1280 S=4 T=4 mr=1 sel=heap (db-parallel),0.015821,0.002764,0.002479,0.000819,361.8,0.00,12.6,PASS(1/1) strict 1/1
@@ -43,4 +39,8 @@ tiled,scan,200000,1,128,10,8,tq=6 tb=1280 S=8 T=8 mr=1 sel=heap (db-parallel),0.
 tiled,scan,200000,1,128,10,12,tq=6 tb=1280 S=12 T=12 mr=1 sel=heap (db-parallel),0.015016,0.002873,0.002645,0.000185,348.1,0.00,37.7,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.013758,0.002755,0.002385,0.000163,363.0,0.16,44.0,PASS(1/1) strict 1/1
 tiled,scan,200000,1,128,10,20,tq=6 tb=1280 S=20 T=20 mr=1 sel=heap (db-parallel),0.020905,0.006232,0.002811,0.002177,160.5,0.16,62.8,PASS(1/1) strict 1/1
-tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000554,0.000014,0.000013,0.000003,72160.5,0.00,3.0,PASS(1/1) strict 1/1
+tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.001204,0.000014212,0.000013065,0.000007208,70363.1,0.00,3.0,PASS(1/1) strict 1/1
+tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000612,0.000013666,0.000012153,0.000002950,73174.3,0.00,3.0,PASS(1/1) strict 1/1
+tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000510,0.000014094,0.000013014,0.000011368,70952.2,0.00,3.0,PASS(1/1) strict 1/1
+tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000467,0.000015177,0.000013456,0.000005636,65889.2,0.00,3.0,PASS(1/1) strict 1/1
+tiled,incache,2000,1,128,10,1,tq=6 tb=1280 S=1 T=1 mr=1 sel=heap (query-parallel),0.000464,0.000014142,0.000012700,0.000006857,70711.4,0.00,3.0,PASS(1/1) strict 1/1
