@@ -1,0 +1,7 @@
+impl,label,nb,nq,d,k,threads,params,preprocess_s,median_s,min_s,std_s,qps,peak_delta_MiB,working_KiB,check
+tiled,sift1m,1000000,1,128,10,14,tq=6 tb=4096 S=14 T=14 mr=1 sel=heap (db-parallel),0.030920,0.006692,0.006441,0.000324,149.4,0.00,44.0,PASS(1/1) strict 1/1
+faiss,sift1m,1000000,1,128,10,14,IndexFlatL2 path=seq,0.064148,0.015825,0.015680,0.000303,63.2,31.80,0.0,PASS
+tiled,sift1m,1000000,64,128,10,14,tq=66 tb=4096 S=14 T=14 mr=6 sel=heap (db-parallel),0.031163,0.030537,0.030285,0.000468,2095.8,0.00,570.6,PASS(32/32) strict 32/32
+faiss,sift1m,1000000,64,128,10,14,IndexFlatL2 path=seq,0.064215,0.172520,0.172295,0.000677,371.0,0.00,0.0,PASS
+tiled,sift1m,1000000,1024,128,10,14,tq=66 tb=4096 S=3 T=14 mr=6 sel=heap (db-parallel),0.032546,0.460109,0.455812,0.017670,2225.6,0.00,825.6,PASS(32/32) strict 32/32
+faiss,sift1m,1000000,1024,128,10,14,IndexFlatL2 path=blas,0.064233,1.458949,1.451208,0.005918,701.9,37.49,16384.0,PASS

@@ -1,14 +1,10 @@
-machine: i9-14900hx laptop
-cpu: Intel Core i9-14900HX (spec: 8 P-cores + 16 E-cores, 32 threads; AVX2 + FMA, no AVX-512)
-cores/threads seen by the OS: 32 logical CPUs (E5 ran at nproc = 32 threads)
-l2 (sysconf): 4 MiB (from the selector's tile size tb = 4096 at d = 128)
-ram: unknown, not recorded
-os: unknown, not recorded
-compiler: unknown, not recorded
-python / numpy / faiss-cpu: unknown, not recorded
-pinning: OMP_PROC_BIND=close OMP_PLACES=threads (set by run_experiments.sh at that commit)
-
-code that produced each result:
-  E1-E7   e471e72  (results added in commit 015206a; that version of run_experiments.sh
-                   only knew thread counts up to 20, so E1 stops at 20 threads)
-Fill in the unknown fields from the machine that ran it (scripts/machine_info.sh prints them).
+cpu: Intel(R) Core(TM) i9-14900HX
+cores/threads seen by the OS: 1 socket(s) x 24 cores x 2 threads = 32 logical CPUs
+l2 (getconf): 4096 KiB
+ram: 31.1 GiB visible
+os: Arch Linux, kernel 7.2.11-zen1-1-zen, native Linux
+compiler: g++ (GCC) 16.2.1 20260810; cmake version 4.4.4
+python: 3.14.8, numpy 2.5.4, faiss-cpu not installed
+git commit: 1b77911 + uncommitted changes
+run 2026-11-26 14:18 experiments: E1 E2 E3 E4 E5 E6 E7 E9 E10 E11; git 1b77911 + uncommitted changes
+run 2026-11-26 14:19 experiments: E1 E2 E3 E4 E5 E6 E7 E9 E10 E11; git 1b77911 + uncommitted changes
