@@ -9,8 +9,8 @@ R=results
 mkdir -p data $R
 REPS=${REPS:-5}
 MAXT=$(nproc)
-# E1 thread counts for the i7-13650HX (6 P-cores = 12 threads, 8 E-cores, 20 total)
-THREADS="1 2 4 6 8 12 14 20"
+# E1 thread counts; those above nproc are skipped (i7-13650HX: 20, i9-14900HX: 32)
+THREADS="1 2 4 6 8 12 14 20 24 32"
 # E2-E4 use 14 threads: with all 20, timings are too noisy
 T14=$(( MAXT < 14 ? MAXT : 14 ))
 # same pinning for knn_bench and faiss_bench.py (both use OpenMP)
@@ -31,7 +31,7 @@ both() {  # csv label db q nq k T
 }
 hdr() { $B header > "$1"; }
 
-E=${*:-E1 E2 E3 E4 E5 E6 E7}
+E=${*:-E1 E2 E3 E4 E5 E6 E7 E9 E10 E11}
 
 # E1: query batch size x threads (main result) — uniform, nb=200k, d=128, k=10
 if [[ " $E " == *" E1 "* ]]; then
@@ -71,7 +71,7 @@ if [[ " $E " == *" E5 "* ]]; then
   hdr $R/e5_selector.csv
   for nq in 1 4 16 64 256 1024; do
     $B run --db data/u128_db.fbin --q data/u128_q.fbin --nq $nq --k 10 --threads $MAXT --reps $REPS --check 0 --label auto | tee -a $R/e5_selector.csv
-    for S in 1 2 4 8 16 20; do [ "$S" -le "$MAXT" ] || continue; for tq in 4 16 64; do for tb in 256 2048 16384; do
+    for S in 1 2 4 8 16 20 24 32; do [ "$S" -le "$MAXT" ] || continue; for tq in 4 16 64; do for tb in 256 2048 16384; do
       $B run --db data/u128_db.fbin --q data/u128_q.fbin --nq $nq --k 10 --threads $MAXT --reps 3 --check 0 \
          --S $S --tq $tq --tb $tb --label grid >> $R/e5_selector.csv
     done; done; done
@@ -102,5 +102,45 @@ if [[ " $E " == *" E7 "* ]]; then
       $B run --db data/u128_db.fbin $Q --threads $T --reps 41 --label scan | tee -a $R/e7_scan.csv
     done
     $B run --db data/u128_db2k.fbin $Q --threads 1 --reps 501 --label incache | tee -a $R/e7_scan.csv
+  done
+fi
+
+# E9: SIFT1M (real data: nb=1M, d=128), 14 threads, both libraries checked.
+# Needs data/sift/sift_base.fvecs and sift_query.fvecs (http://corpus-texmex.irisa.fr/).
+if [[ " $E " == *" E9 "* ]]; then
+  if [ -f data/sift/sift_base.fvecs ] && [ -f data/sift/sift_query.fvecs ]; then
+    hdr $R/e9_sift.csv
+    for nq in 1 64 1024; do
+      both $R/e9_sift.csv sift1m sift/sift_base.fvecs sift/sift_query.fvecs $nq 10 $T14
+    done
+  else
+    echo "E9 skipped: data/sift/sift_base.fvecs or data/sift/sift_query.fvecs not found"
+  fi
+fi
+
+# E10: top-k selection, heap vs buffer (+ nth_element compaction) vs the
+# selector's choice; uniform nb=200k d=128, 14 threads.
+if [[ " $E " == *" E10 "* ]]; then
+  gen uniform 200000 128 1 u128_db.fbin; gen uniform 4096 128 2 u128_q.fbin
+  hdr $R/e10_select.csv
+  for k in 1 10 100 1000; do for nq in 16 1024; do for sel in heap buf auto; do
+    $B run --db data/u128_db.fbin --q data/u128_q.fbin --nq $nq --k $k --threads $T14 --reps $REPS \
+       --check 32 --sel $sel --label $sel | tee -a $R/e10_select.csv
+  done; done; done
+fi
+
+# E11: strict mode (results identical to the double-precision reference) on vs
+# off; nb=200k d=128 k=10, 14 threads; the check column also counts rows whose
+# ids equal the reference exactly.
+if [[ " $E " == *" E11 "* ]]; then
+  gen uniform 200000 128 1 u128_db.fbin; gen uniform 4096 128 2 u128_q.fbin
+  for fam in clustered ties; do gen $fam 200000 128 5 ${fam}_db.fbin; gen $fam 1024 128 6 ${fam}_q.fbin; done
+  hdr $R/e11_strict.csv
+  for fam in uniform clustered ties; do
+    if [ $fam = uniform ]; then db=u128_db.fbin; q=u128_q.fbin; else db=${fam}_db.fbin; q=${fam}_q.fbin; fi
+    for nq in 1 64 1024; do for st in 0 1; do
+      $B run --db data/$db --q data/$q --nq $nq --k 10 --threads $T14 --reps $REPS --check 32 \
+         --strict $st --label ${fam}_strict$st | tee -a $R/e11_strict.csv
+    done; done
   done
 fi

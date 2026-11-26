@@ -89,6 +89,14 @@ void pack_database(const float* Y, size_t nb, size_t d, PackedDB& out) {
             out.norms[p * PANEL + j] = row < nb ? n : INF;  // padding never wins
         }
     }
+    double mx = 0;
+#pragma omp parallel for schedule(static) reduction(max : mx)
+    for (size_t row = 0; row < nb; row++) {
+        double n = 0;
+        for (size_t t = 0; t < d; t++) n += double(Y[row * d + t]) * Y[row * d + t];
+        mx = std::max(mx, n);
+    }
+    out.max_norm = mx;
 }
 
 // ---------------------------------------------------------- top-k heap ----
@@ -185,12 +193,37 @@ static inline void micro_kernel(const float* __restrict Q, size_t d,
 }
 #endif
 
-// Consume the micro-kernel output directly into the per-query heaps.
+// --------------------------------------------------- buffer selection ----
+// Alternative to the heap for large k: append every candidate below the
+// threshold to a buffer of capacity 2k (4k was slower); when it is full, keep the k best with
+// nth_element and set the threshold to the k-th. O(1) amortised per candidate
+// instead of O(log k), at the cost of a looser threshold between compactions.
+using Cand = std::pair<float, idx_t>;
+constexpr size_t BUF_FACTOR = 2;  // buffer capacity = BUF_FACTOR * k
+
+static inline bool by_policy(const Cand& a, const Cand& b) {
+    return a.first < b.first || (a.first == b.first && a.second < b.second);
+}
+// Keeps the k best of buf[0..n) in buf[0..k) (unordered); returns the k-th.
+static inline float compact(Cand* buf, size_t n, size_t k) {
+    std::nth_element(buf, buf + (k - 1), buf + n, by_policy);
+    return buf[k - 1].first;
+}
+
+// Per-query selection state inside one task.
+struct QSel {
+    float* hd;    // heap mode: k distances (max-heap)
+    idx_t* hi;    //            k ids
+    Cand* buf;    // buffer mode: capacity BUF_FACTOR * k
+    size_t n;     //              entries in buf
+};
+
+// Consume the micro-kernel output directly into the per-query heaps/buffers.
 // pd = ||y||^2 - 2<x,y>  (the ||x||^2 term is added after selection).
-template <int NP>
+template <bool BUF, int NP>
 static inline void select_from_registers(v16 (*acc)[NP], const float* yn,
-                                         idx_t id0, size_t nrows, float** hd,
-                                         idx_t** hi, float* thr, size_t k) {
+                                         idx_t id0, size_t nrows, QSel* q,
+                                         float* thr, size_t k) {
     for (size_t r = 0; r < nrows; r++) {
         for (int c = 0; c < NP; c++) {
 #if KNN_AVX2_KERNEL
@@ -219,8 +252,18 @@ static inline void select_from_registers(v16 (*acc)[NP], const float* yn,
                 // ids are scanned in increasing order inside a task, so a tie
                 // (v == thr) must lose to the earlier id: strict < is exact.
                 if (v < thr[r]) {
-                    heap_replace_top(hd[r], hi[r], k, v, id0 + c * PANEL + j);
-                    thr[r] = hd[r][0];
+                    const idx_t id = id0 + c * PANEL + j;
+                    if constexpr (BUF) {
+                        QSel& s = q[r];
+                        s.buf[s.n++] = {v, id};
+                        if (s.n == BUF_FACTOR * k) {
+                            thr[r] = compact(s.buf, s.n, k);
+                            s.n = k;
+                        }
+                    } else {
+                        heap_replace_top(q[r].hd, q[r].hi, k, v, id);
+                        thr[r] = q[r].hd[0];
+                    }
                 }
             }
         }
@@ -228,10 +271,9 @@ static inline void select_from_registers(v16 (*acc)[NP], const float* yn,
 }
 
 // All queries of a tile against database panels [b0, b1), R queries at a time.
-template <int R>
+template <bool BUF, int R>
 static inline void scan_block(const PackedDB& db, const float* Qt, size_t nqt_rows,
-                              size_t b0, size_t b1, float** hd, idx_t** hi,
-                              float* thr, size_t k) {
+                              size_t b0, size_t b1, QSel* q, float* thr, size_t k) {
     const size_t d = db.d;
     for (size_t g = 0; g < nqt_rows; g += R) {
         const size_t rows = std::min<size_t>(R, nqt_rows - g);
@@ -240,14 +282,14 @@ static inline void scan_block(const PackedDB& db, const float* Qt, size_t nqt_ro
         for (; pp + NP_MAX <= b1; pp += NP_MAX) {
             v16 acc[R][NP_MAX];
             micro_kernel<R, NP_MAX>(Qg, d, db.panels + pp * d * PANEL, acc);
-            select_from_registers<NP_MAX>(acc, db.norms + pp * PANEL, idx_t(pp * PANEL),
-                                          rows, hd + g, hi + g, thr + g, k);
+            select_from_registers<BUF, NP_MAX>(acc, db.norms + pp * PANEL, idx_t(pp * PANEL),
+                                               rows, q + g, thr + g, k);
         }
         if (NP_MAX > 1 && pp < b1) {
             v16 acc[R][1];
             micro_kernel<R, 1>(Qg, d, db.panels + pp * d * PANEL, acc);
-            select_from_registers<1>(acc, db.norms + pp * PANEL, idx_t(pp * PANEL),
-                                     rows, hd + g, hi + g, thr + g, k);
+            select_from_registers<BUF, 1>(acc, db.norms + pp * PANEL, idx_t(pp * PANEL),
+                                          rows, q + g, thr + g, k);
         }
     }
 }
@@ -265,15 +307,31 @@ MachineInfo MachineInfo::detect() {
 std::string SearchParams::describe() const {
     std::ostringstream os;
     os << "tq=" << tq << " tb=" << tb << " S=" << db_splits << " T=" << nthreads
-       << " mr=" << mr
+       << " mr=" << mr << " sel=" << (sel == 2 ? "buf" : "heap")
+       << (strict ? " strict rescans=" + std::to_string(strict_rescans) : std::string())
        << (db_splits == 1 ? " (query-parallel)" : " (db-parallel)");
     return os.str();
 }
 
 static size_t round_up(size_t a, size_t b) { return (a + b - 1) / b * b; }
 
-SearchParams select_params(size_t nq, size_t nb, size_t d, size_t k,
-                           const MachineInfo& m, size_t mem_budget) {
+// Smallest k at which the buffer was no slower than the heap at nq = 16 and
+// 1024 (14 threads), for that k and every larger one tested (k = 1..1000).
+constexpr size_t SEL_BUF_MIN_K = 128;
+
+// Strict mode: extra candidates kept per query beyond k.
+static size_t strict_extra(size_t k) { return 8 + k / 8; }
+
+// selection memory per query of a tile
+static size_t sel_bytes_per_query(size_t k, int sel) {
+    return sel == 2 ? BUF_FACTOR * k * sizeof(Cand) : k * (sizeof(float) + sizeof(idx_t));
+}
+
+// force_sel = 1/2 sizes the tile for that selection method instead of the
+// selector's choice (so forcing heap or buffer gives a fair configuration).
+static SearchParams select_params_for(size_t nq, size_t nb, size_t d, size_t k,
+                                      const MachineInfo& m, size_t mem_budget,
+                                      int force_sel) {
     SearchParams p;
     p.nthreads = m.nthreads > 0 ? m.nthreads : 1;
     const int T = p.nthreads;
@@ -285,10 +343,16 @@ SearchParams select_params(size_t nq, size_t nb, size_t d, size_t k,
     tb = std::min(tb, round_up(std::max<size_t>(nb, 1), 2 * PANEL));
     p.tb = tb;
 
+    // Top-k selection: the heap costs O(log k) per accepted candidate, the
+    // buffer O(1) amortised but with a looser threshold. Buffer from k >=
+    // SEL_BUF_MIN_K (measured on the i7-13650HX; E10 checks it).
+    p.sel = k >= SEL_BUF_MIN_K ? 2 : 1;
+    if (force_sel == 1 || force_sel == 2) p.sel = force_sel;
+
     // Query tile: about 64 queries (a multiple of MR) is enough to amortise one
     // L2 block, but keep the tile itself + its heaps within ~L1..L2/4.
     size_t tq = round_up(64, MR);
-    while (tq > MR && tq * (d * sizeof(float) + k * 12) > m.l2 / 4)
+    while (tq > MR && tq * (d * sizeof(float) + sel_bytes_per_query(k, p.sel)) > m.l2 / 4)
         tq = std::max(MR, tq / 2 / MR * MR);
     tq = std::min(tq, round_up(std::max<size_t>(nq, 1), MR));
     p.tq = std::max(tq, MR);
@@ -321,45 +385,127 @@ SearchParams select_params(size_t nq, size_t nb, size_t d, size_t k,
     return p;
 }
 
+SearchParams select_params(size_t nq, size_t nb, size_t d, size_t k,
+                           const MachineInfo& m, size_t mem_budget) {
+    return select_params_for(nq, nb, d, k, m, mem_budget, 0);
+}
+
 size_t tiled_working_bytes(size_t nq, size_t d, size_t k, const SearchParams& p) {
+    if (p.strict) k += strict_extra(k);
     size_t per_thread = round_up(p.tq, MR) * (d + 1) * sizeof(float);
+    if (p.sel == 2) per_thread += round_up(p.tq, MR) * sel_bytes_per_query(k, 2);
     size_t partial = p.db_splits > 1 ? size_t(p.db_splits) * nq * k * 12 : 0;
     return per_thread * size_t(p.nthreads) + partial;
 }
 
 // --------------------------------------------------------------- search ----
-// Query-tile buffer of one thread, kept between searches and only ever grown.
-// Allocating and freeing it in every search made the process grow.
+// ------------------------------------------------------------ strict ----
+// Copies database row id out of the packed panels.
+static void gather_row(const PackedDB& db, idx_t id, float* y) {
+    const float* P = db.panels + size_t(id) / PANEL * db.d * PANEL + size_t(id) % PANEL;
+    for (size_t t = 0; t < db.d; t++) y[t] = P[t * PANEL];
+}
+
+// Writes the m best of e[0..n) by (double distance, id) to D/I, pads to k.
+static void write_exact(std::vector<std::pair<double, idx_t>>& e, size_t m, size_t k,
+                        float* D, idx_t* I) {
+    std::partial_sort(e.begin(), e.begin() + m, e.end());  // pair order = tie policy
+    for (size_t r = 0; r < k; r++) {
+        D[r] = r < m ? float(e[r].first) : INF;
+        I[r] = r < m ? e[r].second : -1;
+    }
+}
+
+// Strict mode for one query. cand[0..kk) are the K = k + extra float
+// candidates, sorted, with final float distances; nc = rows that reached the
+// merge, pdK = pd of the K-th candidate before ||x||^2 was added.
+//
+// eb bounds |float distance - true distance| for every row: the norm
+// expansion in float has error <= about (2d + 4) u (||x||^2 + ||y||^2), u =
+// 2^-24; (2d + 8) leaves a margin. Rows whose float distance exceeds
+// hi = f_k + 3 eb (f_k = k-th float distance) are truly farther than the
+// k-th by at least eb, so only rows with float distance <= hi can be in the
+// reference's top k. They are all among the candidates if every row was
+// merged (nc == nb) or the K-th candidate is already beyond hi; those are
+// recomputed with exact_l2sq and ranked by (double, id), like the reference.
+// Otherwise (e.g. more than K - k rows tie at the k-th distance) the query is
+// rescanned in double. Returns 1 for a rescan, else 0.
+static size_t strict_rerank(const PackedDB& db, const float* x, const Cand* cand, size_t kk,
+                            size_t nc, size_t K, float pdK, float xn, size_t k,
+                            std::vector<std::pair<double, idx_t>>& e, float* yrow,
+                            float* D, idx_t* I) {
+    const size_t d = db.d, nb = db.nb, m = std::min(k, nb);
+    e.clear();
+    if (m == 0) { write_exact(e, 0, k, D, I); return 0; }
+    double xnd = 0;
+    for (size_t t = 0; t < d; t++) xnd += double(x[t]) * x[t];
+    const double eb = (2.0 * double(d) + 8.0) * 0x1p-24 * (xnd + db.max_norm);
+    // every row of the database is among the candidates
+    const bool all_rows = nc == nb && kk == nc;
+    // pdK is only meaningful when the candidate list is full (kk == K); with
+    // fewer, rows may have been dropped (e.g. NaN distances): rescan
+    if (all_rows || (kk == K && kk >= m)) {
+        const double hi = all_rows ? INFINITY : double(cand[m - 1].first) + 3 * eb;
+        const bool complete = all_rows || double(std::max(0.f, pdK + xn)) > hi;
+        if (complete) {
+            for (size_t r = 0; r < kk; r++)
+                if (double(cand[r].first) <= hi) {
+                    gather_row(db, cand[r].second, yrow);
+                    e.push_back({exact_l2sq(x, yrow, d), cand[r].second});
+                }
+            if (e.size() >= m) { write_exact(e, m, k, D, I); return 0; }
+            e.clear();
+        }
+    }
+    e.reserve(nb);  // full rescan in double
+    for (size_t j = 0; j < nb; j++) {
+        gather_row(db, idx_t(j), yrow);
+        e.push_back({exact_l2sq(x, yrow, d), idx_t(j)});
+    }
+    write_exact(e, m, k, D, I);
+    return 1;
+}
+
+// Per-thread buffers (query tile, selection buffers), kept between searches
+// and only ever grown. Allocating and freeing them in every search made the
+// process grow.
 struct TileBuffer {
-    float* p = nullptr;
+    void* p = nullptr;
     size_t bytes = 0;
     TileBuffer() = default;
     TileBuffer(const TileBuffer&) = delete;
     TileBuffer& operator=(const TileBuffer&) = delete;
     ~TileBuffer() { std::free(p); }
-    float* get(size_t need) {
+    void* get(size_t need) {
         if (need > bytes) {
             std::free(p);
-            p = (float*)aligned_alloc64(need);
+            p = aligned_alloc64(need);
             bytes = p ? need : 0;
         }
         return p;
     }
 };
-static thread_local TileBuffer tile_buffer;
+static thread_local TileBuffer tile_buffer, cand_buffer;
 
 SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
                           size_t k, float* D, idx_t* I, SearchParams p) {
     const size_t d = db.d, nb = db.nb;
     MachineInfo m = MachineInfo::detect();
     if (p.nthreads > 0) m.nthreads = p.nthreads;
-    SearchParams auto_p = select_params(nq, nb, d, k, m);
+    // strict mode selects K = k + extra candidates; everything up to the
+    // final rerank works on K
+    const size_t K = p.strict ? k + strict_extra(k) : k;
+    p.strict_rescans = 0;
+    SearchParams auto_p = select_params_for(nq, nb, d, K, m, 64u << 20, p.sel);
     if (!p.tq) p.tq = auto_p.tq;
     if (!p.tb) p.tb = auto_p.tb;
     if (!p.db_splits) p.db_splits = auto_p.db_splits;
     if (!p.nthreads) p.nthreads = auto_p.nthreads;
     if (!p.mr) p.mr = auto_p.mr;
     if (p.mr != 1 && p.mr != 2) p.mr = int(MR);
+    if (!p.sel) p.sel = auto_p.sel;
+    if (p.sel != 2) p.sel = 1;
+    const bool buf = p.sel == 2;
     p.tq = round_up(p.tq, MR);
     p.tb = std::max<size_t>(PANEL, round_up(p.tb, PANEL));
     if (nq == 0 || k == 0) return p;
@@ -370,25 +516,27 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
     const size_t bp = p.tb / PANEL;  // panels per block
 
     // Heap storage: with S == 1 the output arrays themselves are the heaps
-    // (zero extra memory). With S > 1 each chunk gets its own nq x k heaps.
+    // (zero extra memory). With S > 1 (or strict mode's K > k) each chunk gets
+    // its own nq x K heaps.
     std::vector<float> part_d;
     std::vector<idx_t> part_i;
     float* HD = D;
     idx_t* HI = I;
-    if (S > 1) {
-        part_d.resize(S * nq * k);
-        part_i.resize(S * nq * k);
+    if (S > 1 || K != k) {
+        part_d.resize(S * nq * K);
+        part_i.resize(S * nq * K);
         HD = part_d.data();
         HI = part_i.data();
     }
 
+    size_t rescans = 0;
 #pragma omp parallel num_threads(p.nthreads)
     {
         const size_t tqp = p.tq;
-        float* Qt = tile_buffer.get(tqp * d * sizeof(float));
+        float* Qt = (float*)tile_buffer.get(tqp * d * sizeof(float));
+        Cand* cb = buf ? (Cand*)cand_buffer.get(tqp * BUF_FACTOR * K * sizeof(Cand)) : nullptr;
         std::vector<float> thr(tqp);
-        std::vector<float*> hdp(tqp);
-        std::vector<idx_t*> hip(tqp);
+        std::vector<QSel> qs(tqp);
 
 #pragma omp for schedule(dynamic, 1)
         for (size_t task = 0; task < nqt * S; task++) {
@@ -400,39 +548,55 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
             std::memcpy(Qt, X + q0 * d, nqt_rows * d * sizeof(float));
             std::memset(Qt + nqt_rows * d, 0, (tqp - nqt_rows) * d * sizeof(float));
             for (size_t r = 0; r < nqt_rows; r++) {
-                hdp[r] = HD + (s * nq + q0 + r) * k;
-                hip[r] = HI + (s * nq + q0 + r) * k;
-                heap_init(hdp[r], hip[r], k);
+                qs[r].hd = HD + (s * nq + q0 + r) * K;
+                qs[r].hi = HI + (s * nq + q0 + r) * K;
+                qs[r].buf = buf ? cb + r * BUF_FACTOR * K : nullptr;
+                qs[r].n = 0;
+                if (!buf) heap_init(qs[r].hd, qs[r].hi, K);
                 thr[r] = INF;
             }
 
             for (size_t b0 = p0; b0 < p1; b0 += bp) {        // L2 block of DB
                 size_t b1 = std::min(p1, b0 + bp);
-                if (p.mr == 1)
-                    scan_block<1>(db, Qt, nqt_rows, b0, b1, hdp.data(), hip.data(), thr.data(), k);
-                else if (p.mr == 2)
-                    scan_block<2>(db, Qt, nqt_rows, b0, b1, hdp.data(), hip.data(), thr.data(), k);
-                else
-                    scan_block<int(MR)>(db, Qt, nqt_rows, b0, b1, hdp.data(), hip.data(), thr.data(), k);
+                QSel* q = qs.data();
+                float* th = thr.data();
+                if (buf) {
+                    if (p.mr == 1) scan_block<true, 1>(db, Qt, nqt_rows, b0, b1, q, th, K);
+                    else if (p.mr == 2) scan_block<true, 2>(db, Qt, nqt_rows, b0, b1, q, th, K);
+                    else scan_block<true, int(MR)>(db, Qt, nqt_rows, b0, b1, q, th, K);
+                } else {
+                    if (p.mr == 1) scan_block<false, 1>(db, Qt, nqt_rows, b0, b1, q, th, K);
+                    else if (p.mr == 2) scan_block<false, 2>(db, Qt, nqt_rows, b0, b1, q, th, K);
+                    else scan_block<false, int(MR)>(db, Qt, nqt_rows, b0, b1, q, th, K);
+                }
             }
+            if (buf)  // keep the K best of each buffer as this chunk's result
+                for (size_t r = 0; r < nqt_rows; r++) {
+                    QSel& sq = qs[r];
+                    if (sq.n > K) compact(sq.buf, sq.n, K), sq.n = K;
+                    for (size_t j = 0; j < K; j++) {
+                        sq.hd[j] = j < sq.n ? sq.buf[j].first : INF;
+                        sq.hi[j] = j < sq.n ? sq.buf[j].second : -1;
+                    }
+                }
         }
 
         // ---- finalise: merge chunks (if any), add ||x||^2, sort by policy
-        std::vector<std::pair<float, idx_t>> cand(S * k);
-#pragma omp for schedule(static)
+        std::vector<std::pair<float, idx_t>> cand(S * K);
+        std::vector<std::pair<double, idx_t>> exact;  // strict mode only
+        std::vector<float> yrow(p.strict ? d : 0);
+#pragma omp for schedule(static) reduction(+ : rescans)
         for (size_t i = 0; i < nq; i++) {
             size_t nc = 0;
             for (size_t s = 0; s < S; s++)
-                for (size_t r = 0; r < k; r++) {
-                    idx_t id = HI[(s * nq + i) * k + r];
-                    if (id >= 0) cand[nc++] = {HD[(s * nq + i) * k + r], id};
+                for (size_t r = 0; r < K; r++) {
+                    idx_t id = HI[(s * nq + i) * K + r];
+                    if (id >= 0) cand[nc++] = {HD[(s * nq + i) * K + r], id};
                 }
-            auto by_policy = [](const std::pair<float, idx_t>& a,
-                                const std::pair<float, idx_t>& b) {
-                return a.first < b.first || (a.first == b.first && a.second < b.second);
-            };
-            size_t kk = std::min(k, nc);
+            size_t kk = std::min(K, nc);
             std::partial_sort(cand.begin(), cand.begin() + kk, cand.begin() + nc, by_policy);
+            // every row not in cand[0..kk) has pd >= pdK (it lost to K others)
+            const float pdK = kk == K ? cand[K - 1].first : INF;
             const float* x = X + i * d;
             float xn = 0;
             for (size_t t = 0; t < d; t++) xn += x[t] * x[t];
@@ -440,12 +604,18 @@ SearchParams tiled_search(const PackedDB& db, const float* X, size_t nq,
                 cand[r].first = std::max(0.f, cand[r].first + xn);
             // adding ||x||^2 can create float ties: re-apply the policy
             std::sort(cand.begin(), cand.begin() + kk, by_policy);
+            if (p.strict) {
+                rescans += strict_rerank(db, x, cand.data(), kk, nc, K, pdK, xn, k, exact,
+                                         yrow.data(), D + i * k, I + i * k);
+                continue;
+            }
             for (size_t r = 0; r < k; r++) {
                 D[i * k + r] = r < kk ? cand[r].first : INF;
                 I[i * k + r] = r < kk ? cand[r].second : -1;
             }
         }
     }
+    p.strict_rescans = rescans;
     return p;
 }
 

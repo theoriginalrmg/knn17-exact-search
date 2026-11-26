@@ -1,0 +1,19 @@
+impl,label,nb,nq,d,k,threads,params,preprocess_s,median_s,min_s,std_s,qps,peak_delta_MiB,working_KiB,check
+tiled,uniform_strict0,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.020963,0.002854,0.002502,0.000159,350.4,0.16,44.0,PASS(1/1) strict 1/1
+tiled,uniform_strict1,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap strict rescans=0 (db-parallel),0.028450,0.003091,0.002859,0.000153,323.5,0.31,45.4,PASS(1/1) strict 1/1
+tiled,uniform_strict0,200000,64,128,10,14,tq=66 tb=1280 S=14 T=14 mr=6 sel=heap (db-parallel),0.026041,0.007212,0.006993,0.000140,8873.9,0.31,570.6,PASS(32/32) strict 32/32
+tiled,uniform_strict1,200000,64,128,10,14,tq=66 tb=1280 S=14 T=14 mr=6 sel=heap strict rescans=0 (db-parallel),0.027061,0.007883,0.007593,0.000250,8118.3,0.31,665.1,PASS(32/32) strict 32/32
+tiled,uniform_strict0,200000,1024,128,10,14,tq=66 tb=1280 S=3 T=14 mr=6 sel=heap (db-parallel),0.026692,0.086864,0.082622,0.002560,11788.6,0.62,825.6,PASS(32/32) strict 32/32
+tiled,uniform_strict1,200000,1024,128,10,14,tq=66 tb=1280 S=3 T=14 mr=6 sel=heap strict rescans=0 (db-parallel),0.024337,0.086324,0.081605,0.002533,11862.2,0.96,1149.6,PASS(32/32) strict 32/32
+tiled,clustered_strict0,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.030775,0.003530,0.003203,0.000197,283.3,0.16,44.0,PASS(1/1) strict 1/1
+tiled,clustered_strict1,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap strict rescans=0 (db-parallel),0.026289,0.003231,0.003146,0.000161,309.5,0.16,45.4,PASS(1/1) strict 1/1
+tiled,clustered_strict0,200000,64,128,10,14,tq=66 tb=1280 S=14 T=14 mr=6 sel=heap (db-parallel),0.029167,0.006980,0.006868,0.000148,9169.2,0.31,570.6,PASS(32/32) strict 31/32
+tiled,clustered_strict1,200000,64,128,10,14,tq=66 tb=1280 S=14 T=14 mr=6 sel=heap strict rescans=0 (db-parallel),0.028635,0.006994,0.006855,0.000134,9150.9,0.47,665.1,PASS(32/32) strict 32/32
+tiled,clustered_strict0,200000,1024,128,10,14,tq=66 tb=1280 S=3 T=14 mr=6 sel=heap (db-parallel),0.037679,0.079578,0.075806,0.001911,12867.8,0.47,825.6,PASS(32/32) strict 31/32
+tiled,clustered_strict1,200000,1024,128,10,14,tq=66 tb=1280 S=3 T=14 mr=6 sel=heap strict rescans=0 (db-parallel),0.026016,0.085476,0.083494,0.001965,11980.0,0.86,1149.6,PASS(32/32) strict 32/32
+tiled,ties_strict0,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap (db-parallel),0.029839,0.003467,0.003250,0.000173,288.5,0.16,44.0,PASS(1/1) strict 1/1
+tiled,ties_strict1,200000,1,128,10,14,tq=6 tb=1280 S=14 T=14 mr=1 sel=heap strict rescans=0 (db-parallel),0.024346,0.003348,0.003344,0.000054,298.7,0.16,45.4,PASS(1/1) strict 1/1
+tiled,ties_strict0,200000,64,128,10,14,tq=66 tb=1280 S=14 T=14 mr=6 sel=heap (db-parallel),0.026395,0.006987,0.006871,0.000227,9159.9,0.31,570.6,PASS(32/32) strict 32/32
+tiled,ties_strict1,200000,64,128,10,14,tq=66 tb=1280 S=14 T=14 mr=6 sel=heap strict rescans=0 (db-parallel),0.026346,0.008511,0.007764,0.003429,7519.6,0.47,665.1,PASS(32/32) strict 32/32
+tiled,ties_strict0,200000,1024,128,10,14,tq=66 tb=1280 S=3 T=14 mr=6 sel=heap (db-parallel),0.030673,0.080684,0.076128,0.002296,12691.5,0.47,825.6,PASS(32/32) strict 32/32
+tiled,ties_strict1,200000,1024,128,10,14,tq=66 tb=1280 S=3 T=14 mr=6 sel=heap strict rescans=0 (db-parallel),0.027492,0.085322,0.081695,0.001967,12001.6,0.86,1149.6,PASS(32/32) strict 32/32

@@ -10,6 +10,14 @@ def read_fbin(p):
         n, d = np.fromfile(f, dtype=np.int32, count=2)
         return np.fromfile(f, dtype=np.float32, count=n * d).reshape(n, d)
 
+def read_fvecs(p):  # SIFT/GIST format: per vector int32 d, then d float32
+    a = np.fromfile(p, dtype=np.int32)
+    d = int(a[0])
+    return np.ascontiguousarray(a.reshape(-1, d + 1)[:, 1:].view(np.float32))
+
+def read_vecs(p):  # .fvecs by extension, everything else as .fbin
+    return read_fvecs(p) if p.endswith(".fvecs") else read_fbin(p)
+
 def rss():
     with open("/proc/self/statm") as f:
         return int(f.read().split()[1]) * resource.getpagesize()
@@ -23,7 +31,7 @@ a = ap.parse_args()
 
 if a.threads: faiss.omp_set_num_threads(a.threads)
 T = faiss.omp_get_max_threads()
-Y = read_fbin(a.db); X = read_fbin(a.q)
+Y = read_vecs(a.db); X = read_vecs(a.q)
 if a.nq: X = np.ascontiguousarray(X[: a.nq])
 nq, d = X.shape; nb = Y.shape[0]; k = a.k
 t0 = time.perf_counter(); index = faiss.IndexFlatL2(d); index.add(Y); pre = time.perf_counter() - t0

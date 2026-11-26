@@ -105,6 +105,7 @@ def pair_table(rows, title, key):
 pair_table(load("e2_dim.csv"), "E2 — dimension (uniform, nb=100k, k=10, 14 threads)", "d")
 pair_table(load("e3_k.csv"), "E3 — k (uniform, nb=200k, d=128, 14 threads)", "k")
 pair_table(load("e4_family.csv"), "E4 — input families (nb=200k, d=128, k=10, 14 threads)", "fam")
+pair_table(load("e9_sift.csv"), "E9 — SIFT1M (nb=1M, d=128, k=10, 14 threads)", "sift")
 
 # ------------------------------------------------------------------ E5 ----
 e5 = load("e5_selector.csv")
@@ -140,6 +141,38 @@ if e6:
     out.append("## E6 — sequential double-precision reference (D1)\n")
     out.append("| nq | ms | ms / query |\n|---|---|---|")
     for r in e6: out.append(f"| {r['nq']} | {ms(r['median_s'])} | {ms(r['median_s']/r['nq'])} |")
+    out.append("")
+
+# ----------------------------------------------------------------- E10 ----
+e10 = load("e10_select.csv")
+if e10:
+    out.append("## E10 — top-k selection: heap vs buffer (uniform, nb=200k, d=128, 14 threads)\n")
+    out.append("| k | nq | heap ms | buffer ms | buffer / heap | selector picks | selector ms | check (heap / buffer / selector) |")
+    out.append("|---|---|---|---|---|---|---|---|")
+    idx = {(r["label"], r["k"], r["nq"]): r for r in e10}
+    for k in sorted({r["k"] for r in e10}):
+        for nq in sorted({r["nq"] for r in e10 if r["k"] == k}):
+            h, b, a = (idx.get((l, k, nq)) for l in ("heap", "buf", "auto"))
+            if not (h and b and a): continue
+            out.append(f"| {k} | {nq} | {ms(h['median_s'])} | {ms(b['median_s'])} | {b['median_s']/h['median_s']:.2f} | "
+                       f"{a['params'].split('sel=')[1].split()[0]} | {ms(a['median_s'])} | {h['check']} / {b['check']} / {a['check']} |")
+    out.append("")
+
+# ----------------------------------------------------------------- E11 ----
+e11 = load("e11_strict.csv")
+if e11:
+    out.append("## E11 — strict mode on vs off (nb=200k, d=128, k=10, 14 threads)\n")
+    out.append("check = rows passing the tolerant check / checked, then rows whose ids equal the reference exactly.\n")
+    out.append("| family | nq | off ms | on ms | on / off | rescans (queries) | check off | check on |")
+    out.append("|---|---|---|---|---|---|---|---|")
+    idx = {(r["label"], r["nq"]): r for r in e11}
+    for fam in dict.fromkeys(r["label"].rsplit("_", 1)[0] for r in e11):
+        for nq in sorted({r["nq"] for r in e11 if r["label"].startswith(fam + "_")}, key=int):
+            a, b = idx.get((fam + "_strict0", nq)), idx.get((fam + "_strict1", nq))
+            if not (a and b): continue
+            rs = b["params"].split("rescans=")[1].split()[0] if "rescans=" in b["params"] else "?"
+            out.append(f"| {fam} | {nq} | {ms(a['median_s'])} | {ms(b['median_s'])} | {b['median_s']/a['median_s']:.2f} | "
+                       f"{rs} of {nq} | {a['check']} | {b['check']} |")
     out.append("")
 
 # ------------------------------------------------------------------ E7 ----

@@ -28,6 +28,11 @@ using idx_t = int64_t;
 void reference_search(const float* X, size_t nq, const float* Y, size_t nb,
                       size_t d, size_t k, float* D, idx_t* I);
 
+// The reference's distance: sum((a-b)^2) in double, in this exact order.
+// Strict mode (SearchParams::strict) uses the same function, so its results
+// match reference_search bit for bit.
+double exact_l2sq(const float* a, const float* b, size_t d);
+
 struct CheckOptions {
     double rtol = -1;     // relative tolerance; <0 => auto (scaled by sqrt(d))
     double atol = 1e-30;  // absolute tolerance
@@ -69,6 +74,7 @@ struct PackedDB {
     size_t nb = 0, d = 0, npanels = 0;
     float* panels = nullptr;  // npanels * d * PANEL floats, 64-byte aligned
     float* norms = nullptr;   // npanels * PANEL; padding rows get +inf
+    double max_norm = 0;      // max ||y||^2 over real rows (strict mode's error bound)
     PackedDB() = default;
     PackedDB(const PackedDB&) = delete;
     PackedDB& operator=(const PackedDB&) = delete;
@@ -87,6 +93,14 @@ struct SearchParams {
     int nthreads = 0;     // 0 = omp_get_max_threads()
     int mr = 0;           // queries per micro-kernel call: 1, 2 or the full
                           // height MR (any other value means MR; 0 = selector)
+    int sel = 0;          // top-k selection: 1 = bounded heap, 2 = buffer +
+                          // threshold + nth_element compaction; 0 = selector
+    bool strict = false;  // results identical to reference_search (ids and
+                          // distances): select k + a few extra candidates in
+                          // float, then rerank those that float rounding could
+                          // misorder in double; queries where that cannot be
+                          // proven are rescanned in double
+    size_t strict_rescans = 0;  // output: queries that needed a full rescan
     std::string describe() const;
 };
 

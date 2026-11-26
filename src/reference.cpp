@@ -11,10 +11,9 @@
 
 namespace knn {
 
-namespace {
 // True squared distance in double precision, computed directly (no expansion,
-// so no cancellation error).
-inline double exact_l2sq(const float* a, const float* b, size_t d) {
+// so no cancellation error). Shared with strict mode in tiled.cpp.
+double exact_l2sq(const float* a, const float* b, size_t d) {
     double s = 0;
     for (size_t t = 0; t < d; t++) {
         double diff = double(a[t]) - double(b[t]);
@@ -22,6 +21,8 @@ inline double exact_l2sq(const float* a, const float* b, size_t d) {
     }
     return s;
 }
+
+namespace {
 
 // Fills `order` with the ids of the k best (distance, id) pairs, sorted.
 void topk_of_row(const std::vector<double>& dist, size_t k,

@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <random>
 #include <vector>
@@ -63,6 +64,12 @@ static void test_hand_checked() {
     SearchParams p; p.db_splits = 3; p.tb = 16; p.nthreads = 3;
     run_tiled(Yd, 40, Xd, 1, 3, 5, p, D, I);
     for (int r = 0; r < 5; r++) EXPECT(I[r] == r, "duplicates across db chunks");
+    // buffer selection on the duplicates, one and three chunks
+    for (int S : {1, 3}) {
+        SearchParams pb; pb.sel = 2; pb.db_splits = S; pb.tb = 16; pb.nthreads = 3;
+        run_tiled(Yd, 40, Xd, 1, 3, 5, pb, D, I);
+        for (int r = 0; r < 5; r++) EXPECT(I[r] == r && D[r] == 3.f, "buffer selection, duplicates");
+    }
 
     // query equal to a database vector -> distance 0, that id first
     std::vector<float> Y2 = make_family("uniform", 100, 8, 1);
@@ -120,6 +127,7 @@ static void test_randomized() {
         }
         const int mrs[4] = {0, 1, 2, 99};  // selector, 1-row, 2-row, full kernel
         p.mr = mrs[(it / 15) % 4];
+        p.sel = (it / 7) % 3;  // selector, heap, buffer
         std::vector<float> D;
         std::vector<idx_t> I;
         run_tiled(Y, nb, X, nq, d, k, p, D, I);
@@ -151,15 +159,63 @@ static void test_tiny_batches() {
     auto Y = make_family("ties", nb, d, 11);
     for (size_t nq = 1; nq <= 8; nq++)
         for (int mr : {0, 1, 2, 99})
-            for (int S : {0, 1, 3}) {
+            for (int S : {0, 1, 3})
+            for (int sel : {1, 2}) {
                 auto X = make_family("ties", nq, d, 100 + nq);
-                SearchParams p; p.mr = mr; p.db_splits = S; p.tb = 32; p.nthreads = 2;
+                SearchParams p; p.mr = mr; p.db_splits = S; p.tb = 32; p.nthreads = 2; p.sel = sel;
                 std::vector<float> D;
                 std::vector<idx_t> I;
                 run_tiled(Y, nb, X, nq, d, k, p, D, I);
                 auto rep = check_results(X.data(), nq, Y.data(), nb, d, k, D.data(), I.data());
                 EXPECT(rep.passed() && rep.strict_rows_ok == nq, "tiny batch strict match");
             }
+}
+
+// Strict mode: ids and distances must equal reference_search exactly, on all
+// families plus an adversarial one (large offset -> float norm expansion loses
+// most digits, so the float order is nearly random and rescans are needed).
+static void test_strict() {
+    std::printf("[strict mode]\n");
+    std::mt19937_64 rng(4242);
+    const char* fams[4] = {"uniform", "clustered", "ties", "offset"};
+    size_t rows = 0, rescans = 0;
+    for (int it = 0; it < 80; it++) {
+        size_t nb = 1 + rng() % 600, nq = 1 + rng() % 40, d = 1 + rng() % 140, k = 1 + rng() % 40;
+        std::string fam = fams[it % 4];
+        std::string base = fam == "offset" ? "uniform" : fam;
+        auto Y = make_family(base, nb, d, rng()), X = make_family(base, nq, d, rng());
+        if (fam == "offset") {
+            for (auto& v : Y) v += 1000.f;
+            for (auto& v : X) v += 1000.f;
+        }
+        SearchParams p;
+        p.strict = true;
+        p.sel = 1 + (it / 4) % 2;
+        const int Ss[3] = {0, 1, 3}, mrs[4] = {0, 1, 2, 99};
+        p.db_splits = Ss[(it / 8) % 3];
+        p.mr = mrs[(it / 3) % 4];
+        if (it % 5 == 0) p.tb = 32;
+        p.nthreads = 1 + it % 3;
+        PackedDB db;
+        pack_database(Y.data(), nb, d, db);
+        std::vector<float> D(nq * k);
+        std::vector<idx_t> I(nq * k);
+        p = tiled_search(db, X.data(), nq, k, D.data(), I.data(), p);
+        std::vector<float> Dr(nq * k);
+        std::vector<idx_t> Ir(nq * k);
+        reference_search(X.data(), nq, Y.data(), nb, d, k, Dr.data(), Ir.data());
+        bool same = I == Ir && std::memcmp(D.data(), Dr.data(), D.size() * sizeof(float)) == 0;
+        auto rep = check_results(X.data(), nq, Y.data(), nb, d, k, D.data(), I.data());
+        rows += nq;
+        rescans += p.strict_rescans;
+        if (!same || !rep.passed() || rep.strict_rows_ok != rep.queries_checked) {
+            std::printf("  case %d fam=%s nb=%zu nq=%zu d=%zu k=%zu %s\n   %s same_as_reference=%d\n", it,
+                        fam.c_str(), nb, nq, d, k, p.describe().c_str(), rep.summary().c_str(), int(same));
+            failures++;
+        }
+    }
+    std::printf("  80 cases, %zu rows identical to reference_search (ids and distances); %zu rescans\n",
+                rows, rescans);
 }
 
 static void test_selector() {
@@ -177,6 +233,7 @@ int main() {
     test_checker_rejects();
     test_randomized();
     test_tiny_batches();
+    test_strict();
     test_selector();
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nALL TESTS PASSED\n", failures);
     return failures ? 1 : 0;

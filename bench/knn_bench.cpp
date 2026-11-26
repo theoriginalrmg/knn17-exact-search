@@ -1,8 +1,10 @@
 // Benchmark / tooling driver.
 //
 //   knn_bench gen   --family uniform|clustered|ties --n N --d D --seed S --out f.fbin
+// --db / --q accept .fbin or .fvecs (SIFT/GIST format, chosen by extension).
+//
 //   knn_bench run   --db db.fbin --q q.fbin --k K [--impl tiled|ref] [--threads T]
-//                   [--S s --tq q --tb b --mr m] [--reps R] [--check M] [--label L]
+//                   [--S s --tq q --tb b --mr m --sel heap|buf --strict 0|1] [--reps R] [--check M] [--label L]
 //                   [--save-res out.res]
 //   knn_bench check --db db.fbin --q q.fbin --k K --res result.res [--check M]
 //
@@ -17,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -36,6 +39,17 @@ static std::map<std::string, std::string> parse(int argc, char** argv, int from)
 }
 static std::string get(std::map<std::string, std::string>& a, const char* key, const char* def) {
     return a.count(key) ? a[key] : std::string(def);
+}
+
+static bool ends_with(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// .fvecs by extension, everything else as .fbin
+static std::vector<float> load_vectors(const std::string& path, size_t& n, size_t& d) {
+    auto v = ends_with(path, ".fvecs") ? read_fvecs(path, n, d) : read_fbin(path, n, d);
+    if (n == 0) throw std::runtime_error("no vectors in " + path);
+    return v;
 }
 
 static void save_res(const std::string& path, size_t nq, size_t k, const float* D, const idx_t* I) {
@@ -65,8 +79,8 @@ int main(int argc, char** argv) {
     }
 
     size_t nb, d, nq, d2;
-    auto Y = read_fbin(get(a, "db", ""), nb, d);
-    auto X = read_fbin(get(a, "q", ""), nq, d2);
+    auto Y = load_vectors(get(a, "db", ""), nb, d);
+    auto X = load_vectors(get(a, "q", ""), nq, d2);
     if (d != d2) { std::fprintf(stderr, "dimension mismatch\n"); return 1; }
     if (a.count("nq")) {  // use only the first nq queries
         nq = std::min(nq, size_t(std::stoul(a["nq"])));
@@ -109,6 +123,11 @@ int main(int argc, char** argv) {
     p.tq = std::stoul(get(a, "tq", "0"));
     p.tb = std::stoul(get(a, "tb", "0"));
     p.mr = std::stoi(get(a, "mr", "0"));
+    p.strict = get(a, "strict", "0") == "1";
+    {
+        std::string sel = get(a, "sel", "auto");
+        p.sel = sel == "heap" ? 1 : sel == "buf" ? 2 : 0;
+    }
     double t0 = now_sec();
     if (impl == "tiled") pack_database(Y.data(), nb, d, db);
     double pre = now_sec() - t0;
@@ -146,7 +165,8 @@ int main(int argc, char** argv) {
         CheckOptions o; o.max_queries = ncheck;
         auto rep = check_results(X.data(), nq, Y.data(), nb, d, k, D.data(), I.data(), o);
         chk = std::string(rep.passed() ? "PASS" : "FAIL") + "(" + std::to_string(rep.tolerant_rows_ok) +
-              "/" + std::to_string(rep.queries_checked) + ")";
+              "/" + std::to_string(rep.queries_checked) + ") strict " +
+              std::to_string(rep.strict_rows_ok) + "/" + std::to_string(rep.queries_checked);
     }
     if (a.count("save-res")) save_res(a["save-res"], nq, k, D.data(), I.data());
 

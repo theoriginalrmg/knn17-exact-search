@@ -15,7 +15,7 @@ tests/test_knn.cpp       hand-checked cases, checker self-test, 120 randomized d
 bench/knn_bench.cpp      benchmark driver (gen / run / check), CSV output
 bench/bandwidth.cpp      STREAM-style memory read benchmark (E7)
 bench/faiss_bench.py     Faiss IndexFlatL2 baseline with identical CSV columns
-scripts/run_experiments.sh   reproduces E1–E7
+scripts/run_experiments.sh   reproduces E1–E7 and E9–E11
 scripts/e8_oversplit.py      E8, run by hand (steps at the top of the script)
 scripts/analyze.py       results/*.csv -> results/summary.md + figures
 results/                 laptop results: raw CSVs, summary.md, figures, e8_oversplit.md
@@ -28,7 +28,8 @@ results_2core_vm/        older results from the 2-vCPU cloud VM (AVX-512)
 # deps: g++ >= 9 (OpenMP), cmake >= 3.16; for the baseline: pip install numpy faiss-cpu matplotlib
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 ./build/knn_test                         # all correctness tests
-scripts/run_experiments.sh               # E1..E7 (~8 min on the laptop); or e.g. "scripts/run_experiments.sh E1"
+scripts/run_experiments.sh               # E1..E7, E9..E11; or e.g. "scripts/run_experiments.sh E1"
+# E9 needs SIFT1M in data/sift/ (sift_base.fvecs, sift_query.fvecs from http://corpus-texmex.irisa.fr/); skipped otherwise
 python3 scripts/analyze.py               # tables + plots
 # sanitizer build: cmake -S . -B build-asan -DKNN_SANITIZE=ON && cmake --build build-asan && ./build-asan/knn_test
 ```
@@ -41,6 +42,11 @@ pinned with `OMP_PROC_BIND=close OMP_PLACES=threads`, except where stated. Kerne
 machine; it was measured only on the [second machine](#second-machine-avx-512).
 E1–E4 use the current code; E5–E8 were run before tile buffers were kept between searches
 (see [Memory](#memory)).
+
+**Note on `results/`:** the E1–E8 numbers quoted below are from the i7 run. The E1–E7 CSVs,
+figures and `summary.md` in `results/` have since been replaced by a run on an i9-14900HX
+(commit 015206a), which this text does not describe yet. E9–E11 (and their sections in
+`summary.md`) are from the i7, with the current code.
 
 ## Input/output contract
 
@@ -100,17 +106,31 @@ far point swapped in, a wrong distance, and an unsorted row.
    per-query **bounded max-heaps** (root = current worst). A 16-lane vector
    compare against the heap threshold skips whole panels; only survivors touch
    the heap. **No distance tile is ever stored.**
+   For large k the heap's O(log k) updates dominate, so there is a second method: append
+   every candidate below the threshold to a buffer of 2k entries; when it is full, keep the
+   k best with `nth_element` and set the threshold to the k-th (O(1) amortised). Ids are
+   still scanned in increasing order, so the tie policy stays exact.
 6. **Exact tie handling in the hot path:** within a task ids are scanned in
    increasing order, so a candidate equal to the threshold must lose → the
    strict `<` filter is exact. After adding ‖x‖² the row is re-sorted by the policy
    (adding ‖x‖² can create new float ties).
-7. **Parallelism:** tasks = (query tile) × (database chunk), `schedule(dynamic)`.
+7. **Strict mode** (`SearchParams::strict`, off by default): results identical to
+   `reference_search`, ids and distances. Selection keeps k + 8 + k/8 float candidates.
+   With a rigorous bound eb on the float error of the norm expansion, only rows with
+   float distance ≤ (k-th float distance + 3·eb) can be in the true top k. If all of them
+   are among the candidates, those are recomputed with the reference's own double-precision
+   distance function and ranked by (distance, id). If that cannot be shown (for example
+   many exact ties at the k-th distance), the query is rescanned in double; the number of
+   rescans is reported.
+8. **Parallelism:** tasks = (query tile) × (database chunk), `schedule(dynamic)`.
    With S = 1 chunk the output arrays *are* the heaps (no extra heap memory). With
    S > 1 each chunk keeps its own heaps and a per-query merge picks the final k.
 
 ### D3 — tile / parallelism selector (`select_params`)
 * `tb` = rows such that `tb·d·4 B ≈ L2/2` (read from `sysconf`).
 * `tq` = 64 rounded up to a multiple of `MR` (64 on AVX-512, 66 on AVX2; shrunk when the tile + heaps exceed L2/4, and when nq is small).
+* Selection: buffer for k ≥ 128, heap below (measured on the i7: the smallest k at which
+  the buffer was no slower at nq = 16 and 1024, for that and every larger k tested).
 * `S` (database splits): smallest S giving ≥ T tasks with ≤ 25% load imbalance,
   limited by blocks per chunk and a partial-heap memory budget (64 MiB).
   → **small batches become database-parallel** (each thread scans nb/S rows —
@@ -233,6 +253,66 @@ Giving each thread about 4 database chunks made nq = 64 at 8 threads 19–24% fa
 up to 46% slower at k = 1000, and a restricted version was up to 23% slower at 6 threads,
 so the selector was left unchanged. Details: [results/e8_oversplit.md](results/e8_oversplit.md).
 
+### E9–E11 (i7-13650HX, current code, 14 threads)
+
+These three were run on the i7 with the current code, after the other experiments.
+
+#### E9: SIFT1M (real data)
+
+nb = 1M, d = 128 (integer-valued SIFT descriptors), k = 10. All runs of both libraries pass
+the checker.
+
+| nq | ours ms | Faiss ms | Faiss / ours | Faiss path |
+|---|---|---|---|---|
+| 1 | 15.60 | 33.44 | 2.1× | seq |
+| 64 | 34.79 | 270 | 7.8× | seq |
+| 1024 | 410 | 1336 | 3.3× | blas |
+
+#### E10: top-k selection, heap vs buffer
+
+Uniform, nb = 200k, d = 128. All runs pass the checker.
+
+| k | nq | heap ms | buffer ms | buffer / heap | selector picks |
+|---|---|---|---|---|---|
+| 1 | 16 | 4.15 | 4.08 | 0.98 | heap |
+| 1 | 1024 | 84.09 | 81.14 | 0.96 | heap |
+| 10 | 16 | 3.98 | 3.99 | 1.00 | heap |
+| 10 | 1024 | 81.73 | 81.94 | 1.00 | heap |
+| 100 | 16 | 5.00 | 4.62 | 0.92 | heap |
+| 100 | 1024 | 107 | 98.33 | 0.92 | heap |
+| 1000 | 16 | 9.39 | 8.09 | 0.86 | buffer |
+| 1000 | 1024 | 172 | 167 | 0.97 | buffer |
+
+* At k = 1 and 10 the buffer is within 0.96–1.00× of the heap, so
+  keeping it costs nothing at small k (the selector uses the heap there anyway).
+* At k = 1000 it is 3–14% faster. At k = 100 it was 8% faster but the
+  selector, whose threshold (k ≥ 128) came from a separate sweep that did not include
+  k = 100, picks the heap: the crossover lies between k = 64 and 128 and was not
+  pinned down further.
+
+#### E11: strict mode on vs off
+
+nb = 200k, d = 128, k = 10. All runs pass the checker.
+
+| family | nq | off ms | on ms | on / off | rescans | ids equal to reference, off → on |
+|---|---|---|---|---|---|---|
+| uniform | 1 | 2.85 | 3.09 | 1.08 | 0 | 1/1 → 1/1 |
+| uniform | 64 | 7.21 | 7.88 | 1.09 | 0 | 32/32 → 32/32 |
+| uniform | 1024 | 86.86 | 86.32 | 0.99 | 0 | 32/32 → 32/32 |
+| clustered | 1 | 3.53 | 3.23 | 0.92 | 0 | 1/1 → 1/1 |
+| clustered | 64 | 6.98 | 6.99 | 1.00 | 0 | 31/32 → 32/32 |
+| clustered | 1024 | 79.58 | 85.48 | 1.07 | 0 | 31/32 → 32/32 |
+| ties | 1 | 3.47 | 3.35 | 0.97 | 0 | 1/1 → 1/1 |
+| ties | 64 | 6.99 | 8.51 | 1.22 | 0 | 32/32 → 32/32 |
+| ties | 1024 | 80.68 | 85.32 | 1.06 | 0 | 32/32 → 32/32 |
+
+* No query needed a rescan on these datasets; the overhead is 0.92–1.22× in single runs
+  at 14 threads, which is within run-to-run noise for most rows.
+* Strict mode turned clustered's 31 of 32 identical rows into 32 of 32.
+* Rescans do happen on adversarial data: in the tests, values offset by 1000 make the float
+  norm expansion lose most digits; non-strict then matched the reference in 1 of 389 rows,
+  strict in all of them, by rescanning every query.
+
 ### Memory
 
 Extra memory of the search over the 79 E1–E4 cases:
@@ -277,3 +357,22 @@ batches** (and, on Faiss's BLAS path, less extra memory in every case we measure
 database-parallel path for nq < threads that 1.16 doesn't use here; that would
 narrow the nq=1 gap.
 
+## Limitations and future work
+
+* **Faiss build:** only the pip wheel (OpenBLAS 0.3.15) was compared. An MKL build would
+  likely be faster on the BLAS path (nq ≥ 1024), and Faiss's current `main`, with its
+  database-parallel path for small batches, was not tested.
+* **AVX-512:** the current code's AVX-512 kernel has not been run on AVX-512 hardware.
+  It was only measured on a 2-vCPU cloud VM with older code; neither laptop has AVX-512.
+* **Per-machine tuning:** the selector's constants (buffer from k ≥ 128, the 1- and 2-row
+  kernels, tile sizes) were measured on the i7 only. The k = 64–128 crossover was not
+  pinned down, and for tiny batches the selector splits the database more than the best
+  grid configuration (E5).
+* **Unequal threads:** chunks are equal in size while threads run at unequal speed. The fix
+  tried in E8 was rejected, and WSL hides which cores are P- or E-cores, so this was not
+  separated.
+* **Strict mode fallback:** when the extra candidates cannot prove the result, the query is
+  rescanned in double over the whole database; a float rescan limited to the error band
+  would be cheaper.
+* **Memory on Faiss's sequential path:** mixed; no memory advantage is claimed there.
+* **Profiling:** no hardware-counter profile (`perf stat`: FLOP rate, cache misses) was made.
